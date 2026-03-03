@@ -9,3 +9,10 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+en_US-lessac-medium.onnx
+en_US-lessac-medium.onnx.json
+
+src/models/silero_vad.onnx
+src/models/silero_vad.onnx.json
+

@@ -6,6 +6,10 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "faster-whisper>=1.2.1",
+    "langchain>=1.2.10",
+    "langchain-community>=0.4.1",
+    "langchain-openai>=1.1.10",
+    "litellm[proxy]>=1.79.2",
     "numpy>=2.4.2",
     "onnxruntime>=1.24.2",
     "openai>=2.24.0",

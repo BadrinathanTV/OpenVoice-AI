@@ -30,6 +30,10 @@ class AudioIO:
         if self.stream_in:
             self.stream_in.stop()
             self.stream_in.close()
+        if self.stream_out:
+            self.stream_out.stop()
+            self.stream_out.close()
+            self.stream_out = None
 
     def get_audio_chunk(self):
         # Blocking call until a chunk is available
@@ -38,6 +42,18 @@ class AudioIO:
     def play_audio(self, audio_data, sample_rate=None):
         if sample_rate is None:
             sample_rate = self.sample_rate
-        # This is blocking. We will upgrade this to async streaming in phase 2/3.
-        sd.play(audio_data, samplerate=sample_rate)
-        sd.wait()
+
+        # Initialize persistent output stream for seamless chunking
+        if self.stream_out is None or self.stream_out.samplerate != sample_rate:
+            if self.stream_out:
+                self.stream_out.close()
+            self.stream_out = sd.OutputStream(samplerate=sample_rate, channels=self.channels)
+            self.stream_out.start()
+            
+        # Ensure 2D array: (frames, channels) as expected by sounddevice write
+        if len(audio_data.shape) == 1:
+            audio_data = np.expand_dims(audio_data, axis=1)
+
+        # stream.write blocks until data is placed in the OS stream buffer, ensuring gapless output
+        if len(audio_data) > 0:
+            self.stream_out.write(audio_data)

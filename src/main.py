@@ -6,10 +6,10 @@ import time
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.audio.io import AudioIO
-from src.models.vad import SileroVAD
-from src.models.asr import ASRModel
-from src.models.llm import LLMModel
-from src.models.tts import TTSModel
+from src.vad.silero import SileroVAD
+from src.asr.whisper import ASRModel
+from src.llm.client import LLMModel
+from src.tts.piper import TTSModel
 
 def main():
     print("Loading models (this takes a few seconds)...")
@@ -60,19 +60,30 @@ def main():
             
             if len(text.strip()) > 3: # Ignore tiny murmurs
                 llm_start = time.time()
-                response = llm.generate_response(text)
-                llm_latency = time.time() - llm_start
-                print(f"AI ({llm_latency:.2f}s): {response}")
                 
-                tts_start = time.time()
-                audio_data, fs = tts.synthesize(response)
-                tts_latency = time.time() - tts_start
-                print(f"TTS Synthesized ({tts_latency:.2f}s)")
+                from src.utils.chunker import SentenceChunker
+                chunker = SentenceChunker()
                 
-                print("Playing...")
-                audio_io.play_audio(audio_data, fs)
+                print("AI: ", end="", flush=True)
                 
-            # Clear trailing mic buffer picked up during processing
+                # We will play audio synchronously chunk by chunk for now. 
+                # (Full asyncio async/await overlapping will be Phase 3)
+                
+                for token in llm.generate_response_stream(text):
+                    print(token, end="", flush=True)
+                    for sentence in chunker.process_token(token):
+                        # As soon as we have a full sentence, synthesize and play
+                        audio_data, fs = tts.synthesize(sentence)
+                        audio_io.play_audio(audio_data, fs)
+                
+                # Flush the remaining text buffer at the end
+                for sentence in chunker.flush():
+                    audio_data, fs = tts.synthesize(sentence)
+                    audio_io.play_audio(audio_data, fs)
+                
+                print() # Newline after response
+                
+                # Clear trailing mic buffer picked up during processing or speaking
             while not audio_io.q_in.empty():
                 audio_io.q_in.get()
 
