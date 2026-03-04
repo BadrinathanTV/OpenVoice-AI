@@ -3,7 +3,7 @@ import numpy as np
 from silero_vad import load_silero_vad
 
 class SileroVAD:
-    def __init__(self, threshold=0.5, sampling_rate=16000):
+    def __init__(self, threshold=0.75, sampling_rate=16000):
         self.sampling_rate = sampling_rate
         self.threshold = threshold
         
