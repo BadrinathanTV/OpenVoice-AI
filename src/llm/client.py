@@ -1,51 +1,47 @@
 import os
-from langchain.chat_models import init_chat_model
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
+from src.agents.session import VoiceSession
 
-load_dotenv()
+load_dotenv(find_dotenv())
 
 class LLMModel:
     def __init__(self, 
-                 model_name="gpt-4o-mini", 
-                 model_provider="openai", 
+                 model_name=None, 
+                 model_provider=None, 
                  api_base=None):
         """
-        Initialize the LLM using LangChain. 
-        To use Ollama locally, pass model_provider="ollama" and the local model_name.
+        Initialize the Independent Modular Agents wrapper.
         """
-        self.system_prompt = "You are a helpful, concise AI voice assistant. Speak naturally in a conversational tone. Do not use markdown, emojis, or special characters."
-        self.messages = [SystemMessage(content=self.system_prompt)]
-        
-        # init_chat_model dynamically loads the right integration based on model_provider
-        self.llm = init_chat_model(
-            model=model_name,
-            model_provider=model_provider,
-            base_url=api_base,
-            temperature=0.7
-        )
+        self.session = VoiceSession()
 
     def add_human_message(self, text: str):
-        self.messages.append(HumanMessage(content=text))
+        self.session.add_human_message(text)
         
     def add_ai_message(self, text: str):
-        if text.strip():
-            self.messages.append(AIMessage(content=text))
+        # The VoiceSession already appends the full generated AIMessage to history.
+        # So we replace the last text message with the actual spoken text, so the LLM
+        # knows if it was cut off mid-sentence by an interrupt.
+        from langchain_core.messages import AIMessage
+        if self.session.messages and isinstance(self.session.messages[-1], AIMessage):
+            # Don't overwrite it if it was a tool call (though it shouldn't be here)
+            if not getattr(self.session.messages[-1], "tool_calls", None):
+                self.session.messages[-1] = AIMessage(content=text)
+                return
+        self.session.add_ai_message(text)
 
     def generate_response_sync(self, user_text: str) -> str:
-        self.add_human_message(user_text)
-        response = self.llm.invoke(self.messages)
-        self.add_ai_message(response.content)
-        return response.content
+        """
+        We only implement the streaming function for TTS. Sync isn't easily supported 
+        with the custom generator loop unless we accumulate it.
+        """
+        response = ""
+        for chunk in self.session.stream_response(user_text):
+            response += chunk + " "
+        return response
 
     def generate_response_stream(self, user_text: str):
         """
-        Yields text chunks (tokens) as they arrive from the LLM.
-        Note: Caller must manually call `add_ai_message()` with the final spoken text afterward to support interrupts.
+        Yields text chunks (tokens) as they arrive from the active LLM Agent.
         """
-        self.add_human_message(user_text)
-        
-        for chunk in self.llm.stream(self.messages):
-            if chunk.content:
-                yield chunk.content
+        yield from self.session.stream_response(user_text)
 

@@ -7,9 +7,9 @@ class SentenceChunker:
     """
     def __init__(self):
         self.buffer = ""
-        # Split on sentence-ending punctuation followed by whitespace, or common clause boundaries
-        # like commas (optional, but good for reducing latency further).
-        self.split_pattern = re.compile(r'([.?!]+|\n)(\s|$)')
+        # Split on sentence-ending punctuation, commas, or colons, followed by a space or end of string.
+        # This makes chunks smaller, reducing TTS latency significantly.
+        self.split_pattern = re.compile(r'([.?!,:]+|\n)(\s|$)')
 
     def process_token(self, token: str):
         """

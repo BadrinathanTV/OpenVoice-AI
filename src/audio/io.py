@@ -50,7 +50,7 @@ class AudioIO:
             sample_rate = self.sample_rate
 
         # Initialize persistent output stream or recreate if aborted by an interruption
-        if self.stream_out is None or self.stream_out.stopped or self.stream_out.closed or self.stream_out.samplerate != sample_rate:
+        if self.stream_out is None or self.stream_out.stopped or getattr(self.stream_out, 'closed', False) or self.stream_out.samplerate != sample_rate:
             if self.stream_out:
                 try:
                     self.stream_out.close()

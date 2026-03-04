@@ -72,6 +72,7 @@ def main():
                 
                 chunker = SentenceChunker()
                 interrupt_flag = [False]
+                is_synthesizing = [False] # New flag for echo cancellation
                 tts_start_time = [0.0]
                 ai_spoken_text = ""
                 
@@ -88,10 +89,14 @@ def main():
                             chunk = audio_io.q_in.get(timeout=0.1) 
                             
                             recent_chunks.append(chunk)
-                            if len(recent_chunks) > 15:
+                            if len(recent_chunks) > 40: # Buffer ~1.28 seconds of audio so we don't cut off their first word
                                 recent_chunks.pop(0)
                                 
                             rms_volume = np.sqrt(np.mean(chunk**2))
+                            is_speech = vad.is_speech(chunk)
+                            
+                            # Debug print to understand exactly what the mic hears during playback
+                            # print(f"DEBUG | Mic-Vol: {rms_volume:.4f} | VAD: {is_speech} | Synthesizing: {is_synthesizing[0]}", flush=True)
                             
                             # DYNAMIC DUCKING:
                             # Since we are actively generating and playing TTS audio during this loop,
@@ -100,9 +105,9 @@ def main():
                             # but will instantly trigger if the human speaks loudly or close to the mic.
                             volume_threshold = 0.05
                             
-                            if vad.is_speech(chunk) and rms_volume > volume_threshold:
+                            if is_speech and rms_volume > volume_threshold:
                                 consecutive_speech += 1
-                                if consecutive_speech > 7: # Require ~224ms of loud speech to interrupt
+                                if consecutive_speech > 3: # Require ~96ms of loud speech to interrupt
                                     print("\n[INTERRUPTED BY USER]")
                                     interrupt_flag[0] = True
                                     interrupt_buffer.extend(recent_chunks)
@@ -131,8 +136,13 @@ def main():
                         if interrupt_flag[0]: break
                         if tts_start_time[0] == 0.0:
                             tts_start_time[0] = time.time()
-                        audio_io.play_audio(audio_data, fs)
-                
+                            
+                        is_synthesizing[0] = True
+                        try:
+                            audio_io.play_audio(audio_data, fs)
+                        finally:
+                            is_synthesizing[0] = False
+                            
                 if not interrupt_flag[0]:
                     for sentence in chunker.flush():
                         if interrupt_flag[0]: break
@@ -141,7 +151,12 @@ def main():
                         if interrupt_flag[0]: break
                         if tts_start_time[0] == 0.0:
                             tts_start_time[0] = time.time()
-                        audio_io.play_audio(audio_data, fs)
+                            
+                        is_synthesizing[0] = True
+                        try:
+                            audio_io.play_audio(audio_data, fs)
+                        finally:
+                            is_synthesizing[0] = False
                 
                 # Capture the actual interruption state before we force the flag to True to kill the thread
                 was_interrupted = interrupt_flag[0]
