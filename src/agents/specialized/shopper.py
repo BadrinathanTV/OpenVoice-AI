@@ -32,7 +32,7 @@ def search_catalog(query: str) -> str:
     return f"I found 3 items matching '{query}': A red shirt for $20, blue jeans for $40, and black shoes for $60."
 
 def get_shopper_agent(model_name="gpt-4o-mini", model_provider="openai"):
-    # We use a more capable model (gpt-4o) for the shopper to handle complex recommendations
+    # We use a more capable model for the shopper to handle complex recommendations
     llm = init_chat_model(model=model_name, model_provider=model_provider, temperature=0.7)
     
     tools = [switch_agent, search_catalog]

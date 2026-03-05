@@ -109,6 +109,8 @@ class VoiceSession:
             # 3. No Tool Calls (or we finished processing tools) -> It's a standard text response
             final_text = response_msg.content
             
+            print(f"\n[{self.active_agent_name} Response]: {final_text}")
+            
             # Yield words to simulate streaming (Since we ran invoke synchronously for stability)
             if final_text:
                 words = final_text.split(" ")

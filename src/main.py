@@ -2,6 +2,7 @@ import os
 import sys
 import numpy as np
 import time
+import queue
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -12,20 +13,18 @@ from src.llm.client import LLMModel
 from src.tts.piper import TTSModel
 
 def main():
-    print("Loading models (this takes a few seconds)...")
     audio_io = AudioIO(sample_rate=16000, chunk_duration_ms=32) # 32ms = 512 samples
     vad = SileroVAD()
-    asr = ASRModel(model_size="base.en")
+    asr = ASRModel()
     llm = LLMModel()
     tts = TTSModel()
     
-    print("Models loaded. Starting audio stream...")
+    
     audio_io.start_recording()
     
     try:
         interrupt_buffer = []
         while True:
-            print("\n--- Listening ---")
             speech_buffer = interrupt_buffer.copy()
             interrupt_buffer.clear()
             is_speaking = len(speech_buffer) > 0 # If we carried over interrupt audio, we are already speaking
@@ -52,7 +51,6 @@ def main():
                     if silence_chunks > 30:
                         break
             
-            print("Processing audio...")
             audio_array = np.concatenate(speech_buffer)
             # Flatten to 1D if stereo
             if len(audio_array.shape) > 1:
@@ -62,7 +60,8 @@ def main():
             start_time = time.time()
             text = asr.transcribe(audio_array)
             asr_latency = time.time() - start_time
-            print(f"USER ({asr_latency:.2f}s): {text}")
+            print(f"\n[ASR Result]: '{text}' (Latency: {asr_latency:.2f}s)")
+
             
             if len(text.strip()) >= 2: # Ignore empty murmurs, but allow short answers like 'No' or 'Hi'
                 llm_start = time.time()
@@ -122,9 +121,18 @@ def main():
                 interrupt_thread.daemon = True
                 interrupt_thread.start()
                 
-                print("AI: ", end="", flush=True)
+
                 
+                # Only print the 'Speaking' label once per response before the chunks start streaming
+                print("\n[Speaking]: ", end="", flush=True)
+                
+                first_token_received = False
                 for token in llm.generate_response_stream(text):
+                    if not first_token_received:
+                        ttft = time.time() - llm_start
+                        print(f"[LLM TTFT: {ttft:.2f}s] ", end="", flush=True)
+                        first_token_received = True
+
                     if interrupt_flag[0]:
                         break
                     
@@ -132,7 +140,12 @@ def main():
                     for sentence in chunker.process_token(token):
                         if interrupt_flag[0]: break
                         ai_spoken_text += sentence + " "
+                        
+                        tts_gen_start = time.time()
                         audio_data, fs = tts.synthesize(sentence)
+                        tts_latency = time.time() - tts_gen_start
+                        print(f" [TTS: {tts_latency:.2f}s] ", end="", flush=True)
+                        
                         if interrupt_flag[0]: break
                         if tts_start_time[0] == 0.0:
                             tts_start_time[0] = time.time()
@@ -147,7 +160,12 @@ def main():
                     for sentence in chunker.flush():
                         if interrupt_flag[0]: break
                         ai_spoken_text += sentence + " "
+                        
+                        tts_gen_start = time.time()
                         audio_data, fs = tts.synthesize(sentence)
+                        tts_latency = time.time() - tts_gen_start
+                        print(f" [TTS: {tts_latency:.2f}s] ", end="", flush=True)
+                        
                         if interrupt_flag[0]: break
                         if tts_start_time[0] == 0.0:
                             tts_start_time[0] = time.time()
@@ -185,7 +203,7 @@ def main():
                     audio_io.q_in.get()
 
     except KeyboardInterrupt:
-        print("\nStopping application...")
+
         audio_io.stop_recording()
 
 if __name__ == "__main__":

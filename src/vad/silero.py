@@ -7,10 +7,14 @@ class SileroVAD:
         self.sampling_rate = sampling_rate
         self.threshold = threshold
         
+        # Enable GPU acceleration for PyTorch
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        device_name = "GPU" if self.device == "cuda" else "CPU"
+
+        
         # Load the Silero VAD model from the python package (downloads ONNX to cache natively)
-        self.model = load_silero_vad()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = self.model.to(self.device)
+        self.model = load_silero_vad().to(self.device)
 
     def is_speech(self, audio_chunk: np.ndarray) -> bool:
         """
@@ -35,6 +39,9 @@ class SileroVAD:
             padding = 512 - len(tensor_chunk)
             tensor_chunk = torch.nn.functional.pad(tensor_chunk, (0, padding))
 
+        # Move tensor to same device as model
+        tensor_chunk = tensor_chunk.to(self.device)
+        
         with torch.no_grad():
             speech_prob = self.model(tensor_chunk, self.sampling_rate).item()
         

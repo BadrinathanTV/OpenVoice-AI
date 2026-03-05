@@ -49,33 +49,18 @@ class AudioIO:
         if sample_rate is None:
             sample_rate = self.sample_rate
 
-        # Initialize persistent output stream or recreate if aborted by an interruption
-        if self.stream_out is None or self.stream_out.stopped or getattr(self.stream_out, 'closed', False) or self.stream_out.samplerate != sample_rate:
-            if self.stream_out:
-                try:
-                    self.stream_out.close()
-                except Exception:
-                    pass
-            self.stream_out = sd.OutputStream(samplerate=sample_rate, channels=self.channels)
-            self.stream_out.start()
-            
-        # Ensure 2D array: (frames, channels) as expected by sounddevice write
-        if len(audio_data.shape) == 1:
-            audio_data = np.expand_dims(audio_data, axis=1)
-
-        # Block and play audio
+        # Use sd.play() for discrete audio chunks with blocking via sd.wait()
+        # This ensures each audio chunk plays completely before the function returns
         if len(audio_data) > 0:
             try:
-                self.stream_out.write(audio_data)
-            except Exception:
-                pass
+                sd.play(audio_data, samplerate=sample_rate, blocking=False)
+                sd.wait()  # Block until playback completes
+            except Exception as e:
+                print(f"Error playing audio: {e}")
 
     def interrupt(self):
         """Immediately aborts playback."""
-        if self.stream_out:
-            try:
-                self.stream_out.stop()
-                self.stream_out.close()
-                self.stream_out = None
-            except Exception:
-                pass
+        try:
+            sd.stop()
+        except Exception:
+            pass

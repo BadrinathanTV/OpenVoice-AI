@@ -1,16 +1,38 @@
-from faster_whisper import WhisperModel
+import torch
 import numpy as np
+from qwen_asr import Qwen3ASRModel
+import warnings
+import os
+
+# Suppress verbose generation warnings from Qwen
+os.environ['TRANSFORMERS_VERBOSITY'] = 'error'
+warnings.filterwarnings('ignore', category=UserWarning, module='transformers')
+
 
 class ASRModel:
-    def __init__(self, model_size="base.en", compute_type="int8"):
-        # Runs on GPU if available, else CPU.
-        # Int8 on RTX 3070 Ti is extremely fast.
-        import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    def __init__(self):
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        device_name = "GPU" if device.startswith("cuda") else "CPU"
+        print(f"[ASR] Loading Qwen3-ASR-0.6B on {device_name}...")
 
-    def transcribe(self, audio_data: np.ndarray) -> str:
-        # faster-whisper expects 16kHz float32 numpy array
-        segments, info = self.model.transcribe(audio_data, beam_size=1, language="en", vad_filter=False)
-        text = " ".join([segment.text for segment in segments])
-        return text.strip()
+        self.model = Qwen3ASRModel.from_pretrained(
+            "/home/badrinathan/Qwen3-ASR-0.6B",
+            dtype=torch.float16 if device.startswith("cuda") else torch.float32,
+            device_map=device,
+            max_new_tokens=256,
+        )
+        print(f"[ASR] Model loaded on {device_name}")
+
+
+    def transcribe(self, audio_data: np.ndarray, sample_rate: int = 16000) -> str:
+        """
+        audio_data : numpy float32 waveform
+        sample_rate : expected 16000
+        """
+
+        results = self.model.transcribe(
+            audio=(audio_data, sample_rate),
+            language="English"
+        )
+
+        return results[0].text.strip()
