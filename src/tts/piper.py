@@ -19,7 +19,9 @@ class TTSModel:
             subprocess.run(["wget", "-q", f"https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/{self.model_name}.onnx", "-O", self.onnx_path])
             subprocess.run(["wget", "-q", f"https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/{self.model_name}.onnx.json", "-O", self.json_path])
         
-        self.voice = PiperVoice.load(self.onnx_path)
+        import torch
+        use_cuda = torch.cuda.is_available()
+        self.voice = PiperVoice.load(self.onnx_path, use_cuda=use_cuda)
 
     def synthesize(self, text: str) -> tuple[np.ndarray, int]:
         # Synthesize text to numpy array directly from Piper's yields

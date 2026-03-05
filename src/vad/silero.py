@@ -9,6 +9,8 @@ class SileroVAD:
         
         # Load the Silero VAD model from the python package (downloads ONNX to cache natively)
         self.model = load_silero_vad()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model = self.model.to(self.device)
 
     def is_speech(self, audio_chunk: np.ndarray) -> bool:
         """
@@ -17,7 +19,7 @@ class SileroVAD:
         """
         # Silero VAD requires chunks of 512 (32ms), 1024, or 1536 samples at 16kHz
         # Let's pad or truncate to 512 for a quick check.
-        tensor_chunk = torch.from_numpy(audio_chunk).float()
+        tensor_chunk = torch.from_numpy(audio_chunk).float().to(self.device)
         
         # Handle stereo by flattening or taking first channel
         if len(tensor_chunk.shape) > 1:
