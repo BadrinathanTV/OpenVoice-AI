@@ -17,7 +17,12 @@ def main():
     vad = SileroVAD()
     asr = ASRModel()
     llm = LLMModel()
-    tts = TTSModel()
+    
+    tts_models = {
+        "CustomerCare": TTSModel(model_name="en_GB-alba-medium"),
+        "Shopper":      TTSModel(model_name="en_US-bryce-medium"),
+        "OrderOps":     TTSModel(model_name="en_US-hfc_female-medium")
+    }
     
     
     audio_io.start_recording()
@@ -140,6 +145,8 @@ def main():
                     for sentence in chunker.process_token(token):
                         if interrupt_flag[0]: break
                         ai_spoken_text += sentence + " "
+                        active_agent = llm.session.active_agent_name
+                        tts = tts_models.get(active_agent, tts_models["CustomerCare"])
                         
                         tts_gen_start = time.time()
                         audio_data, fs = tts.synthesize(sentence)
@@ -160,6 +167,8 @@ def main():
                     for sentence in chunker.flush():
                         if interrupt_flag[0]: break
                         ai_spoken_text += sentence + " "
+                        active_agent = llm.session.active_agent_name
+                        tts = tts_models.get(active_agent, tts_models["CustomerCare"])
                         
                         tts_gen_start = time.time()
                         audio_data, fs = tts.synthesize(sentence)
@@ -201,6 +210,15 @@ def main():
             if not was_interrupted:
                 while not audio_io.q_in.empty():
                     audio_io.q_in.get()
+                    
+                # Cooldown flush: discard ~500ms of mic audio to prevent
+                # the ASR from transcribing the AI's own residual echo
+                cooldown_end = time.time() + 0.5
+                while time.time() < cooldown_end:
+                    try:
+                        audio_io.q_in.get(timeout=0.05)
+                    except queue.Empty:
+                        pass
 
     except KeyboardInterrupt:
 

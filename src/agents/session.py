@@ -34,9 +34,9 @@ class VoiceSession:
 
     def stream_response(self, user_text: str):
         """
-        Streams words from the active agent.
-        If the active agent calls a tool, we execute it.
-        If the active agent calls 'switch_agent', we intercept and instantly jump to the target agent.
+        True streaming: yields token chunks as they arrive from the LLM.
+        If the LLM calls a tool, we collect the full response, execute the tool,
+        then re-prompt the agent (which may produce another streamed text response).
         """
         self.add_human_message(user_text)
         
@@ -45,49 +45,82 @@ class VoiceSession:
             
             print(f"\n--- [VoiceSession: Routing directly to {self.active_agent_name}] ---")
             
-            # 1. Invoke the LLM with the current conversation history
-            response_msg = active_llm.invoke(self.messages)
+            # Stream tokens from the LLM
+            collected_content = ""
+            collected_tool_calls = []
+            full_response = None
             
-            # The LLM generated a message or a tool call, add it to history
+            for chunk in active_llm.stream(self.messages):
+                # Accumulate tool calls if present
+                if hasattr(chunk, "tool_call_chunks") and chunk.tool_call_chunks:
+                    for tc_chunk in chunk.tool_call_chunks:
+                        # Build up tool calls from streamed chunks
+                        idx = tc_chunk.get("index", 0)
+                        while len(collected_tool_calls) <= idx:
+                            collected_tool_calls.append({"name": "", "args": "", "id": ""})
+                        if tc_chunk.get("name"):
+                            collected_tool_calls[idx]["name"] += tc_chunk["name"]
+                        if tc_chunk.get("args"):
+                            collected_tool_calls[idx]["args"] += tc_chunk["args"]
+                        if tc_chunk.get("id"):
+                            collected_tool_calls[idx]["id"] += tc_chunk["id"]
+                
+                # Yield text content immediately as it arrives
+                if chunk.content:
+                    collected_content += chunk.content
+                    yield chunk.content
+            
+            # Build the full AIMessage for history
+            if collected_tool_calls and collected_tool_calls[0]["name"]:
+                # Parse tool call args from JSON string
+                import json
+                parsed_tool_calls = []
+                for tc in collected_tool_calls:
+                    try:
+                        args = json.loads(tc["args"]) if tc["args"] else {}
+                    except json.JSONDecodeError:
+                        args = {}
+                    parsed_tool_calls.append({
+                        "name": tc["name"],
+                        "args": args,
+                        "id": tc["id"]
+                    })
+                
+                response_msg = AIMessage(content=collected_content, tool_calls=parsed_tool_calls)
+            else:
+                response_msg = AIMessage(content=collected_content)
+            
             self.messages.append(response_msg)
             
-            # 2. Check for Tool Calls
-            if hasattr(response_msg, "tool_calls") and len(response_msg.tool_calls) > 0:
+            # Handle tool calls
+            if hasattr(response_msg, "tool_calls") and response_msg.tool_calls:
                 tool_call = response_msg.tool_calls[0]
                 tool_name = tool_call["name"]
                 tool_args = tool_call["args"]
                 
                 print(f"[Tool Execution] {tool_name}({tool_args})")
                 
-                # Intercept the exact switch_agent tool
                 if tool_name == "switch_agent":
                     target = tool_args.get("target_agent", "CustomerCare")
                     reason = tool_args.get("reason", "No reason provided")
                     
                     if target in self.agents:
                         print(f"[Intercept Handoff] Switching to {target}. Reason: {reason}")
-                        
-                        # Add a fake tool response so the LLM history is satisfied
                         self.messages.append(ToolMessage(
                             tool_call_id=tool_call["id"],
                             name=tool_name,
                             content=f"Successfully transferred to {target}."
                         ))
-                        
-                        # Apply the switch
                         self.active_agent_name = target
-                        
-                        # Loop back around to instantly prompt the NEW agent with the user's original request + handoff context
-                        continue 
+                        continue
                     else:
                         self.messages.append(ToolMessage(
                             tool_call_id=tool_call["id"],
                             name=tool_name,
                             content=f"Error: Agent '{target}' not found."
                         ))
-                        continue # loop back to current agent
+                        continue
                 
-                # Execute normal data tools
                 elif tool_name in self.tools:
                     tool_func = self.tools[tool_name]
                     result = tool_func.invoke(tool_args)
@@ -96,7 +129,6 @@ class VoiceSession:
                         name=tool_name,
                         content=str(result)
                     ))
-                    # Loop back around to the SAME agent to summarize the tool output
                     continue
                 else:
                     self.messages.append(ToolMessage(
@@ -106,16 +138,6 @@ class VoiceSession:
                     ))
                     continue
             
-            # 3. No Tool Calls (or we finished processing tools) -> It's a standard text response
-            final_text = response_msg.content
-            
-            print(f"\n[{self.active_agent_name} Response]: {final_text}")
-            
-            # Yield words to simulate streaming (Since we ran invoke synchronously for stability)
-            if final_text:
-                words = final_text.split(" ")
-                for i, word in enumerate(words):
-                    yield word + (" " if i < len(words) -1 else "")
-                    
-            # Break out of the orchestration loop, we're done speaking to the user
+            # No tool calls — we streamed text, print the full response and break
+            print(f"\n[{self.active_agent_name} Response]: {collected_content}")
             break

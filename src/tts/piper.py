@@ -5,13 +5,13 @@ import tempfile
 import wave
 
 class TTSModel:
-    def __init__(self, model_path="en_US-lessac-medium.voice"):
+    def __init__(self, model_name="en_US-amy-medium"):
         # We will use Piper TTS python bindings.
         # For simplicity in initialization, we download a default onnx model if missing.
         from piper.voice import PiperVoice
         import onnxruntime
         
-        self.model_name = "en_US-lessac-medium"
+        self.model_name = model_name
         self.onnx_path = f"{self.model_name}.onnx"
         self.json_path = f"{self.onnx_path}.json"
         
@@ -21,9 +21,19 @@ class TTSModel:
 
         
         if not os.path.exists(self.onnx_path):
-
-            subprocess.run(["wget", "-q", f"https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/{self.model_name}.onnx", "-O", self.onnx_path])
-            subprocess.run(["wget", "-q", f"https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/{self.model_name}.onnx.json", "-O", self.json_path])
+            parts = self.model_name.split('-')
+            lang_speaker = parts[0]
+            speaker = parts[1]
+            quality = parts[2]
+            
+            # Extract just the "en" or "fr" from "en_US" or "fr_FR"
+            lang = lang_speaker[:2]
+            
+            base_url = f"https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/{lang}/{lang_speaker}/{speaker}/{quality}"
+            
+            print(f"Downloading {self.model_name}...")
+            subprocess.run(["curl", "-L", "-s", "-o", self.onnx_path, f"{base_url}/{self.model_name}.onnx"], check=True)
+            subprocess.run(["curl", "-L", "-s", "-o", self.json_path, f"{base_url}/{self.model_name}.onnx.json"], check=True)
         
         # Set providers for GPU acceleration
         providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
