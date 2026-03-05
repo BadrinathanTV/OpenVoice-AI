@@ -3,9 +3,11 @@ import sys
 import numpy as np
 import time
 import queue
+import threading
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src.utils.chunker import SentenceChunker
 from src.audio.io import AudioIO
 from src.vad.silero import SileroVAD
 from src.asr.whisper import ASRModel
@@ -70,9 +72,6 @@ def main():
             
             if len(text.strip()) >= 2: # Ignore empty murmurs, but allow short answers like 'No' or 'Hi'
                 llm_start = time.time()
-                
-                from src.utils.chunker import SentenceChunker
-                import threading
                 
                 chunker = SentenceChunker()
                 interrupt_flag = [False]
@@ -159,7 +158,7 @@ def main():
                             
                         is_synthesizing[0] = True
                         try:
-                            audio_io.play_audio(audio_data, fs)
+                            audio_io.play_audio(audio_data, fs, interrupt_flag)
                         finally:
                             is_synthesizing[0] = False
                             
@@ -181,7 +180,7 @@ def main():
                             
                         is_synthesizing[0] = True
                         try:
-                            audio_io.play_audio(audio_data, fs)
+                            audio_io.play_audio(audio_data, fs, interrupt_flag)
                         finally:
                             is_synthesizing[0] = False
                 

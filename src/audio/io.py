@@ -45,7 +45,8 @@ class AudioIO:
         # Blocking call until a chunk is available
         return self.q_in.get()
 
-    def play_audio(self, audio_data, sample_rate=None):
+    def play_audio(self, audio_data, sample_rate=None, interrupt_flag=None):
+        import time
         if sample_rate is None:
             sample_rate = self.sample_rate
 
@@ -54,7 +55,16 @@ class AudioIO:
         if len(audio_data) > 0:
             try:
                 sd.play(audio_data, samplerate=sample_rate, blocking=False)
-                sd.wait()  # Block until playback completes
+                if interrupt_flag is not None:
+                    duration = len(audio_data) / sample_rate
+                    start_time = time.time()
+                    while time.time() - start_time < duration:
+                        if interrupt_flag[0]:
+                            sd.stop()
+                            break
+                        time.sleep(0.01)
+                else:
+                    sd.wait()  # Block until playback completes
             except Exception as e:
                 print(f"Error playing audio: {e}")
 

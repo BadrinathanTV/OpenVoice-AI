@@ -1,5 +1,4 @@
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
-from src.agents.state import SessionState
 from src.agents.specialized.customer_care import get_customer_care_agent, lookup_policy
 from src.agents.specialized.shopper import get_shopper_agent, search_catalog
 from src.agents.specialized.order_ops import get_order_ops_agent, check_order_status

@@ -1,13 +1,4 @@
 from langchain_core.tools import tool
-from typing import TypedDict, Annotated, Sequence
-import operator
-from langchain_core.messages import BaseMessage
-
-class SessionState(TypedDict):
-    """
-    The state of the conversation. Now strictly for history tracking, not routing.
-    """
-    messages: Annotated[Sequence[BaseMessage], operator.add]
 
 @tool
 def switch_agent(target_agent: str, reason: str):
