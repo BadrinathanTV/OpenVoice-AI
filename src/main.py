@@ -2,6 +2,7 @@ import os
 import sys
 import numpy as np
 import time
+import queue
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -12,20 +13,18 @@ from src.llm.client import LLMModel
 from src.tts.piper import TTSModel
 
 def main():
-    print("Loading models (this takes a few seconds)...")
     audio_io = AudioIO(sample_rate=16000, chunk_duration_ms=32) # 32ms = 512 samples
     vad = SileroVAD()
-    asr = ASRModel(model_size="base.en")
+    asr = ASRModel()
     llm = LLMModel()
     tts = TTSModel()
     
-    print("Models loaded. Starting audio stream...")
+    
     audio_io.start_recording()
     
     try:
         interrupt_buffer = []
         while True:
-            print("\n--- Listening ---")
             speech_buffer = interrupt_buffer.copy()
             interrupt_buffer.clear()
             is_speaking = len(speech_buffer) > 0 # If we carried over interrupt audio, we are already speaking
@@ -52,7 +51,6 @@ def main():
                     if silence_chunks > 30:
                         break
             
-            print("Processing audio...")
             audio_array = np.concatenate(speech_buffer)
             # Flatten to 1D if stereo
             if len(audio_array.shape) > 1:
@@ -62,7 +60,7 @@ def main():
             start_time = time.time()
             text = asr.transcribe(audio_array)
             asr_latency = time.time() - start_time
-            print(f"USER ({asr_latency:.2f}s): {text}")
+
             
             if len(text.strip()) >= 2: # Ignore empty murmurs, but allow short answers like 'No' or 'Hi'
                 llm_start = time.time()
@@ -122,7 +120,7 @@ def main():
                 interrupt_thread.daemon = True
                 interrupt_thread.start()
                 
-                print("AI: ", end="", flush=True)
+
                 
                 for token in llm.generate_response_stream(text):
                     if interrupt_flag[0]:
@@ -185,7 +183,7 @@ def main():
                     audio_io.q_in.get()
 
     except KeyboardInterrupt:
-        print("\nStopping application...")
+
         audio_io.stop_recording()
 
 if __name__ == "__main__":

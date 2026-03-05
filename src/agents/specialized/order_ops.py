@@ -30,7 +30,7 @@ def check_order_status(order_id: str = "latest") -> str:
     """Check the shipping status of an order."""
     return "Your latest order is currently out for delivery and should arrive by 8 PM tonight."
 
-def get_order_ops_agent(model_name="gpt-4o-mini", model_provider="openai"):
+def get_order_ops_agent(model_name="openai/gpt-oss-120b", model_provider="groq"):
     llm = init_chat_model(model=model_name, model_provider=model_provider, temperature=0.1) # low temp for precise operations
     
     tools = [switch_agent, check_order_status]

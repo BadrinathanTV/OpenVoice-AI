@@ -1,6 +1,11 @@
 import os
 from dotenv import load_dotenv, find_dotenv
 from src.agents.session import VoiceSession
+import warnings
+
+# Suppress verbose generation warnings
+os.environ['TRANSFORMERS_VERBOSITY'] = 'error'
+warnings.filterwarnings('ignore', category=UserWarning)
 
 load_dotenv(find_dotenv())
 
