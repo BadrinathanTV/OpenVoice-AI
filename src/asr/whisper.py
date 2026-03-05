@@ -16,7 +16,7 @@ class ASRModel:
         print(f"[ASR] Loading Qwen3-ASR-0.6B on {device_name}...")
 
         self.model = Qwen3ASRModel.from_pretrained(
-            "Qwen/Qwen3-ASR-0.6B",
+            "/home/badrinathan/Qwen3-ASR-0.6B",
             dtype=torch.float16 if device.startswith("cuda") else torch.float32,
             device_map=device,
             max_new_tokens=256,

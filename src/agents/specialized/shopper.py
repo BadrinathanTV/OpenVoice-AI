@@ -31,7 +31,7 @@ def search_catalog(query: str) -> str:
     """Search the product catalog for items matching the query."""
     return f"I found 3 items matching '{query}': A red shirt for $20, blue jeans for $40, and black shoes for $60."
 
-def get_shopper_agent(model_name="openai/gpt-oss-120b", model_provider="groq"):
+def get_shopper_agent(model_name="gpt-4o-mini", model_provider="openai"):
     # We use a more capable model for the shopper to handle complex recommendations
     llm = init_chat_model(model=model_name, model_provider=model_provider, temperature=0.7)
     

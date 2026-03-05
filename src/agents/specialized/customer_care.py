@@ -33,7 +33,7 @@ def lookup_policy(topic: str) -> str:
         return "Standard shipping takes 3-5 business days. Expedited takes 1-2 days."
     return "I couldn't find a specific policy for that, but I'm happy to help you figure it out."
 
-def get_customer_care_agent(model_name="openai/gpt-oss-120b", model_provider="groq"):
+def get_customer_care_agent(model_name="gpt-4o-mini", model_provider="openai"):
     llm = init_chat_model(model=model_name, model_provider=model_provider, temperature=0.5)
     
     # Bind the handoff tool AND the specialist tools

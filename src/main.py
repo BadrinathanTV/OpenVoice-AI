@@ -60,6 +60,7 @@ def main():
             start_time = time.time()
             text = asr.transcribe(audio_array)
             asr_latency = time.time() - start_time
+            print(f"\n[ASR Result]: '{text}' (Latency: {asr_latency:.2f}s)")
 
             
             if len(text.strip()) >= 2: # Ignore empty murmurs, but allow short answers like 'No' or 'Hi'
@@ -122,7 +123,16 @@ def main():
                 
 
                 
+                # Only print the 'Speaking' label once per response before the chunks start streaming
+                print("\n[Speaking]: ", end="", flush=True)
+                
+                first_token_received = False
                 for token in llm.generate_response_stream(text):
+                    if not first_token_received:
+                        ttft = time.time() - llm_start
+                        print(f"[LLM TTFT: {ttft:.2f}s] ", end="", flush=True)
+                        first_token_received = True
+
                     if interrupt_flag[0]:
                         break
                     
@@ -130,7 +140,12 @@ def main():
                     for sentence in chunker.process_token(token):
                         if interrupt_flag[0]: break
                         ai_spoken_text += sentence + " "
+                        
+                        tts_gen_start = time.time()
                         audio_data, fs = tts.synthesize(sentence)
+                        tts_latency = time.time() - tts_gen_start
+                        print(f" [TTS: {tts_latency:.2f}s] ", end="", flush=True)
+                        
                         if interrupt_flag[0]: break
                         if tts_start_time[0] == 0.0:
                             tts_start_time[0] = time.time()
@@ -145,7 +160,12 @@ def main():
                     for sentence in chunker.flush():
                         if interrupt_flag[0]: break
                         ai_spoken_text += sentence + " "
+                        
+                        tts_gen_start = time.time()
                         audio_data, fs = tts.synthesize(sentence)
+                        tts_latency = time.time() - tts_gen_start
+                        print(f" [TTS: {tts_latency:.2f}s] ", end="", flush=True)
+                        
                         if interrupt_flag[0]: break
                         if tts_start_time[0] == 0.0:
                             tts_start_time[0] = time.time()
