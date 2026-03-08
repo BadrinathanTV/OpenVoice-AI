@@ -1,0 +1,6 @@
+{
+  "python.defaultInterpreterPath": "/home/badrinathan/Desktop/Projects/OpenVoice AI/backend/.venv/bin/python",
+  "python.analysis.extraPaths": [
+    "/home/badrinathan/Desktop/Projects/OpenVoice AI/backend"
+  ]
+}
