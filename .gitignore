@@ -7,13 +7,13 @@ wheels/
 *.egg-info
 
 # Virtual environments
-.venv
+.venv/
 .env
 
-# TTS voice models (downloaded at runtime)
-models/*.onnx
-models/*.onnx.json
-
-# Legacy model paths (in case any remain in root)
+# TTS voice models
 *.onnx
 *.onnx.json
+
+# Frontend
+node_modules/
+frontend/dist/

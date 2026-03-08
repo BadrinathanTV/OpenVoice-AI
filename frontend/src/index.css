@@ -1,0 +1,631 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* ─── Design Tokens ──────────────────────────────────────────────── */
+:root {
+  /* Background */
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #12121a;
+  --bg-glass: rgba(255, 255, 255, 0.04);
+  --bg-glass-hover: rgba(255, 255, 255, 0.08);
+  --border-glass: rgba(255, 255, 255, 0.08);
+
+  /* Text */
+  --text-primary: #f0f0f5;
+  --text-secondary: #8a8a9a;
+  --text-muted: #55556a;
+
+  /* Agent Colors */
+  --agent-customer-care: #6C63FF;
+  --agent-customer-care-glow: rgba(108, 99, 255, 0.4);
+  --agent-shopper: #00C9A7;
+  --agent-shopper-glow: rgba(0, 201, 167, 0.4);
+  --agent-order-ops: #FF6B6B;
+  --agent-order-ops-glow: rgba(255, 107, 107, 0.4);
+
+  /* Dynamic (set by JS based on active agent) */
+  --agent-color: var(--agent-customer-care);
+  --agent-glow: var(--agent-customer-care-glow);
+  --glow-intensity: 0;
+
+  /* Misc */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-full: 9999px;
+  --transition-fast: 150ms ease;
+  --transition-normal: 300ms ease;
+  --transition-slow: 600ms ease;
+
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  color-scheme: dark;
+}
+
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-glass); border-radius: var(--radius-full); }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+/* ─── Glass Panel ────────────────────────────────────────────────── */
+.glass-panel {
+  background: var(--bg-glass);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-lg);
+}
+
+/* ─── App Layout ─────────────────────────────────────────────────── */
+.app-layout {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  background: radial-gradient(ellipse at 30% 50%, rgba(108, 99, 255, 0.03) 0%, transparent 60%),
+              var(--bg-primary);
+}
+
+.app-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 32px;
+  background: rgba(10, 10, 15, 0.7);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-glass);
+}
+
+.app-header__logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
+}
+
+.app-header__logo-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, var(--agent-customer-care), var(--agent-shopper));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.app-header__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #555;
+  transition: background var(--transition-normal);
+}
+
+.status-dot--connected {
+  background: #00C9A7;
+  box-shadow: 0 0 8px rgba(0, 201, 167, 0.5);
+}
+
+.status-dot--connecting {
+  background: #FFD93D;
+  animation: pulse-dot 1s infinite;
+}
+
+.status-dot--disconnected {
+  background: #FF6B6B;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* ─── Voice Panel (Left) ─────────────────────────────────────────── */
+.voice-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 40px 40px;
+  position: relative;
+  min-width: 0;
+}
+
+/* ─── Orb Container ──────────────────────────────────────────────── */
+.orb-container {
+  position: relative;
+  width: 280px;
+  height: 280px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Outer glow rings */
+.orb-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid var(--agent-color);
+  opacity: 0;
+  transition: border-color var(--transition-slow);
+}
+
+.orb-ring--1 {
+  width: 100%;
+  height: 100%;
+  opacity: 0.08;
+  animation: ring-breathe 4s ease-in-out infinite;
+}
+
+.orb-ring--2 {
+  width: 120%;
+  height: 120%;
+  opacity: 0.05;
+  animation: ring-breathe 4s ease-in-out infinite 0.5s;
+}
+
+.orb-ring--3 {
+  width: 140%;
+  height: 140%;
+  opacity: 0.03;
+  animation: ring-breathe 4s ease-in-out infinite 1s;
+}
+
+@keyframes ring-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.05; }
+  50% { transform: scale(1.05); opacity: 0.12; }
+}
+
+/* Core orb */
+.orb-core {
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%,
+    color-mix(in srgb, var(--agent-color) 40%, white) 0%,
+    var(--agent-color) 40%,
+    color-mix(in srgb, var(--agent-color) 60%, black) 100%
+  );
+  box-shadow:
+    0 0 40px var(--agent-glow),
+    0 0 80px color-mix(in srgb, var(--agent-glow) 50%, transparent),
+    inset 0 0 40px rgba(0, 0, 0, 0.3);
+  transition:
+    background var(--transition-slow),
+    box-shadow var(--transition-slow),
+    transform var(--transition-normal);
+  animation: orb-idle 4s ease-in-out infinite;
+  position: relative;
+  z-index: 2;
+}
+
+@keyframes orb-idle {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+
+/* ─── Orb States ─────────────────────────────────────────────────── */
+
+/* Recording / Listening state */
+.orb-container[data-state="recording"] .orb-core {
+  animation: orb-listen 1.5s ease-in-out infinite;
+}
+
+.orb-container[data-state="recording"] .orb-ring {
+  animation: ring-listen 1.2s ease-out infinite;
+}
+
+@keyframes orb-listen {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+@keyframes ring-listen {
+  0% { transform: scale(1); opacity: 0.2; }
+  100% { transform: scale(1.3); opacity: 0; }
+}
+
+/* Thinking / Processing state */
+.orb-container[data-state="processing"] .orb-core,
+.orb-container[data-state="thinking"] .orb-core {
+  animation: orb-think 2s linear infinite;
+  filter: brightness(0.85) saturate(0.7);
+}
+
+@keyframes orb-think {
+  0% { transform: scale(1) rotate(0deg); }
+  25% { transform: scale(0.97) rotate(90deg); }
+  50% { transform: scale(1) rotate(180deg); }
+  75% { transform: scale(0.97) rotate(270deg); }
+  100% { transform: scale(1) rotate(360deg); }
+}
+
+.orb-container[data-state="processing"] .orb-ring,
+.orb-container[data-state="thinking"] .orb-ring {
+  animation: ring-spin 3s linear infinite;
+}
+
+@keyframes ring-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Speaking state — HERO ANIMATION */
+.orb-container[data-state="speaking"] .orb-core {
+  animation: orb-speak 0.8s ease-in-out infinite;
+  box-shadow:
+    0 0 60px var(--agent-glow),
+    0 0 120px var(--agent-glow),
+    0 0 200px color-mix(in srgb, var(--agent-glow) 30%, transparent),
+    inset 0 0 30px rgba(255, 255, 255, 0.1);
+  filter: brightness(1.15);
+}
+
+@keyframes orb-speak {
+  0%, 100% { transform: scale(1.02); }
+  30% { transform: scale(1.10); }
+  60% { transform: scale(1.05); }
+}
+
+.orb-container[data-state="speaking"] .orb-ring--1 {
+  animation: ring-speak 1.2s ease-out infinite;
+}
+.orb-container[data-state="speaking"] .orb-ring--2 {
+  animation: ring-speak 1.2s ease-out infinite 0.3s;
+}
+.orb-container[data-state="speaking"] .orb-ring--3 {
+  animation: ring-speak 1.2s ease-out infinite 0.6s;
+}
+
+@keyframes ring-speak {
+  0% { transform: scale(1); opacity: 0.3; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+/* Particle canvas behind the orb */
+.orb-particles {
+  position: absolute;
+  inset: -60px;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* ─── Agent Label ────────────────────────────────────────────────── */
+.agent-label {
+  margin-top: 32px;
+  text-align: center;
+}
+
+.agent-label__name {
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  transition: color var(--transition-slow);
+  color: var(--agent-color);
+}
+
+.agent-label__status {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.agent-label__badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-size: 0.7rem;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--agent-color) 15%, transparent);
+  color: var(--agent-color);
+  border: 1px solid color-mix(in srgb, var(--agent-color) 30%, transparent);
+}
+
+/* ─── Mic Button ─────────────────────────────────────────────────── */
+.mic-button {
+  margin-top: 48px;
+  width: 72px;
+  height: 72px;
+  border: none;
+  border-radius: 50%;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--agent-color) 80%, white),
+    var(--agent-color)
+  );
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-normal);
+  box-shadow:
+    0 4px 20px var(--agent-glow),
+    0 0 0 0 var(--agent-glow);
+  position: relative;
+}
+
+.mic-button:hover {
+  transform: scale(1.08);
+  box-shadow:
+    0 6px 30px var(--agent-glow),
+    0 0 0 6px color-mix(in srgb, var(--agent-glow) 30%, transparent);
+}
+
+.mic-button:active {
+  transform: scale(0.96);
+}
+
+.mic-button--active {
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  0%, 100% {
+    box-shadow:
+      0 4px 20px var(--agent-glow),
+      0 0 0 0 var(--agent-glow);
+  }
+  50% {
+    box-shadow:
+      0 6px 30px var(--agent-glow),
+      0 0 0 14px color-mix(in srgb, var(--agent-glow) 0%, transparent);
+  }
+}
+
+.mic-button__label {
+  margin-top: 12px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+/* ─── Transcript Panel (Right) ───────────────────────────────────── */
+.transcript-panel {
+  width: 420px;
+  display: flex;
+  flex-direction: column;
+  padding: 80px 0 0;
+  border-left: 1px solid var(--border-glass);
+  background: var(--bg-secondary);
+}
+
+.transcript-panel__header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-glass);
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  letter-spacing: -0.01em;
+}
+
+.transcript-panel__messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.transcript-panel__empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 40px;
+  line-height: 1.6;
+}
+
+/* Message Bubble */
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: msg-appear 0.3s ease-out;
+}
+
+@keyframes msg-appear {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.message--user {
+  align-items: flex-end;
+}
+
+.message--ai {
+  align-items: flex-start;
+}
+
+.message__sender {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 0 4px;
+}
+
+.message__bubble {
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  font-size: 0.88rem;
+  line-height: 1.55;
+  max-width: 92%;
+  word-wrap: break-word;
+}
+
+.message--user .message__bubble {
+  background: color-mix(in srgb, var(--agent-color) 18%, transparent);
+  color: var(--text-primary);
+  border: 1px solid color-mix(in srgb, var(--agent-color) 25%, transparent);
+}
+
+.message--ai .message__bubble {
+  background: var(--bg-glass);
+  color: var(--text-primary);
+  border: 1px solid var(--border-glass);
+}
+
+.message__agent-tag {
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: var(--agent-color);
+  opacity: 0.7;
+}
+
+/* ─── Text Input ─────────────────────────────────────────────────── */
+.text-input-bar {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border-glass);
+  display: flex;
+  gap: 10px;
+}
+
+.text-input-bar__input {
+  flex: 1;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-glass);
+  background: var(--bg-glass);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.88rem;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.text-input-bar__input::placeholder {
+  color: var(--text-muted);
+}
+
+.text-input-bar__input:focus {
+  border-color: color-mix(in srgb, var(--agent-color) 50%, transparent);
+}
+
+.text-input-bar__send {
+  width: 42px;
+  height: 42px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--agent-color);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.text-input-bar__send:hover {
+  filter: brightness(1.15);
+  transform: scale(1.05);
+}
+
+.text-input-bar__send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ─── Mode Toggle ────────────────────────────────────────────────── */
+.mode-toggle {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-glass);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-glass);
+}
+
+.mode-toggle__btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.mode-toggle__btn--active {
+  background: var(--agent-color);
+  color: white;
+}
+
+/* ─── Responsive ─────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .app-layout {
+    flex-direction: column;
+  }
+  .voice-panel {
+    flex: none;
+    height: 55vh;
+    padding: 70px 20px 20px;
+  }
+  .orb-container {
+    width: 200px;
+    height: 200px;
+  }
+  .orb-core {
+    width: 130px;
+    height: 130px;
+  }
+  .transcript-panel {
+    width: 100%;
+    height: 45vh;
+    border-left: none;
+    border-top: 1px solid var(--border-glass);
+    padding-top: 0;
+  }
+  .mic-button {
+    width: 56px;
+    height: 56px;
+    margin-top: 24px;
+  }
+}
