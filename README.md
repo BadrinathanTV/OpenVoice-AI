@@ -360,5 +360,6 @@ This project is for educational and research purposes.
 ---
 
 <p align="center">
-  Built with ❤️ by <strong>Badrinathan TV</strong>
+  Built with ❤️ by <strong>The Three !</strong>
 </p>
+
