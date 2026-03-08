@@ -1,13 +1,12 @@
-from langchain_core.tools import tool
+import operator
+from typing import Annotated, Sequence
+from langchain_core.messages import BaseMessage
+from typing_extensions import TypedDict
 
-@tool
-def switch_agent(target_agent: str, reason: str):
+class VoiceState(TypedDict):
     """
-    Use this tool to transfer the user to a different specialized agent when their request is outside your domain.
-    Valid target_agent options:
-    - "CustomerCare": For general inquiries, policies, returns, refunds, or general chat.
-    - "Shopper": For product recommendations, searching the catalog, or adding items to a cart.
-    - "OrderOps": For managing existing orders, tracking packages, modifying a cart, or checking out.
+    Global Shared State for the Voice Swarm.
+    Uses TypedDict for proper LangGraph state initialization.
     """
-    # This function body is a stub. The VoiceSession wrapper will intercept this tool call and handle the actual agent switching.
-    return f"Transferring to {target_agent}..."
+    messages: Annotated[Sequence[BaseMessage], operator.add]
+    active_agent: str

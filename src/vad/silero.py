@@ -1,20 +1,15 @@
 import torch
 import numpy as np
 from silero_vad import load_silero_vad
+from src.core.interfaces import IVAD
 
-class SileroVAD:
+class SileroVAD(IVAD):
     def __init__(self, threshold=0.75, sampling_rate=16000):
         self.sampling_rate = sampling_rate
         self.threshold = threshold
         
-        # Enable GPU acceleration for PyTorch
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        device_name = "GPU" if self.device == "cuda" else "CPU"
-
-        
-        # Load the Silero VAD model from the python package (downloads ONNX to cache natively)
+        # Load the Silero VAD model with GPU acceleration if available
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        device_name = "GPU" if self.device.type == "cuda" else "CPU"
         self.model = load_silero_vad().to(self.device)
 
     def is_speech(self, audio_chunk: np.ndarray) -> bool:

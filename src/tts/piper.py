@@ -3,8 +3,9 @@ import subprocess
 import numpy as np
 import tempfile
 import wave
+from src.core.interfaces import ITTS
 
-class TTSModel:
+class TTSModel(ITTS):
     def __init__(self, model_name="en_US-amy-medium"):
         # We will use Piper TTS python bindings.
         # For simplicity in initialization, we download a default onnx model if missing.
@@ -12,7 +13,10 @@ class TTSModel:
         import onnxruntime
         
         self.model_name = model_name
-        self.onnx_path = f"{self.model_name}.onnx"
+        # Models live in the models/ directory at project root
+        models_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "models")
+        os.makedirs(models_dir, exist_ok=True)
+        self.onnx_path = os.path.join(models_dir, f"{self.model_name}.onnx")
         self.json_path = f"{self.onnx_path}.json"
         
         # Enable GPU acceleration for ONNX Runtime

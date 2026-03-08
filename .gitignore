@@ -10,25 +10,10 @@ wheels/
 .venv
 .env
 
-en_US-lessac-medium.onnx
-en_US-lessac-medium.onnx.json
+# TTS voice models (downloaded at runtime)
+models/*.onnx
+models/*.onnx.json
 
-src/models/silero_vad.onnx
-src/models/silero_vad.onnx.json
-en_US-alba-medium.onnx
-en_US-alba-medium.onnx.json 
-en_US-amy-medium.onnx
-en_US-amy-medium.onnx.json
-en_US-bryce-medium.onnx
-en_US-bryce-medium.onnx.json
-
-en_US-hfc_female-medium.onnx
-en_US-hfc_female-medium.onnx.json
-
-en_US-lessac-medium.onnx
-en_US-lessac-medium.onnx.json
-en_GB-alba-medium.onnx
-en_GB-alba-medium.onnx.json
-
-research/
-
+# Legacy model paths (in case any remain in root)
+*.onnx
+*.onnx.json

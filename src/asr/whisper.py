@@ -3,20 +3,22 @@ import numpy as np
 from qwen_asr import Qwen3ASRModel
 import warnings
 import os
+from src.core.interfaces import IASR
 
 # Suppress verbose generation warnings from Qwen
 os.environ['TRANSFORMERS_VERBOSITY'] = 'error'
 warnings.filterwarnings('ignore', category=UserWarning, module='transformers')
 
 
-class ASRModel:
+class ASRModel(IASR):
     def __init__(self):
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         device_name = "GPU" if device.startswith("cuda") else "CPU"
         print(f"[ASR] Loading Qwen3-ASR-0.6B on {device_name}...")
 
+        model_path = os.getenv("ASR_MODEL_PATH", "Qwen3-ASR-0.6B")
         self.model = Qwen3ASRModel.from_pretrained(
-            "/home/badrinathan/Qwen3-ASR-0.6B",
+            model_path,
             dtype=torch.float16 if device.startswith("cuda") else torch.float32,
             device_map=device,
             max_new_tokens=256,

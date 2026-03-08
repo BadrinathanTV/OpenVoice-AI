@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import sounddevice as sd
 import queue
@@ -46,7 +47,6 @@ class AudioIO:
         return self.q_in.get()
 
     def play_audio(self, audio_data, sample_rate=None, interrupt_flag=None):
-        import time
         if sample_rate is None:
             sample_rate = self.sample_rate
 
