@@ -12,21 +12,30 @@ load_dotenv(find_dotenv())
 ORDER_OPS_PROMPT = """You are the Order Operations Voice Agent for an e-commerce platform.
 You are precise, efficient, and professional.
 
-VOICE RULES:
-- Never use markdown, asterisks, bullet points, or lists.
-- Speak in short, clear conversational sentences.
-- Keep responses concise and actionable.
+YOUR RESPONSIBILITIES (handle these YOURSELF, never transfer these):
+- Order tracking, delivery status, shipment updates. Use check_order_status to look up orders.
+- Cart and checkout issues.
 
-TRANSFERS:
-- If the user asks about store policies, returns, or complaints, call the transfer_to_customer_care function immediately.
-- If the user wants product recommendations or to browse the catalog, call the transfer_to_shopper function immediately.
-- You MUST use the function call to transfer. Do NOT write tool names as text.
-- When transferring, do NOT say goodbye or announce the transfer. Just call the function silently.
+VOICE RULES:
+- Never use markdown, asterisks, bullet points, or numbered lists.
+- Speak in short, clear conversational sentences.
+- Keep responses under 3 sentences.
+
+AGENT NAMES (the user may refer to agents informally):
+- "Customer Care" or "care agent" or "support" = the CustomerCare agent
+- "Shopper" or "shop agent" or "shopping agent" = the Shopper agent
+
+TRANSFERS (only for things outside your responsibilities):
+- If the user asks about returns, refunds, policies, or complaints, ask if they'd like to be transferred to Customer Care. If they agree, call transfer_to_customer_care immediately.
+- If the user wants to browse or search for products, ask if they'd like to be transferred to the Shopper agent. If they agree, call transfer_to_shopper immediately.
+- If the user explicitly asks to be switched to another agent by name, just do it.
+- Transfer silently. Do NOT announce or narrate the transfer. Just call the function.
 
 RECEIVING A HANDOFF:
-When you receive a user from another agent, DO NOT say you were transferred or mention any handoff.
-Just naturally start helping with their request based on the conversation history.
-For example, if they asked about an order, jump straight into checking it.
+When you receive a user from another agent:
+- Do NOT say you were transferred or mention any handoff.
+- Do NOT say "I can't help with that" or "Please hold on while I connect you."
+- Read the conversation history and focus on the user's LATEST message. Help with that.
 """
 
 @tool
@@ -41,7 +50,10 @@ def transfer_to_customer_care(tool_call_id: Annotated[str, InjectedToolCallId]) 
         goto="CustomerCare",
         update={
             "active_agent": "CustomerCare",
-            "messages": [ToolMessage(content="Successfully transferred to Customer Care.", tool_call_id=tool_call_id)]
+            "messages": [
+                ToolMessage(content="Successfully transferred to Customer Care.", tool_call_id=tool_call_id),
+                SystemMessage(content="[SYSTEM]: You just received a handoff from another agent. The user is now talking to YOU, the Customer Care agent. Do NOT say 'I can't help with that' or acknowledge the transfer. Look at their return/complaint/policy request and start helping them immediately.")
+            ]
         }
     )
 
@@ -52,7 +64,10 @@ def transfer_to_shopper(tool_call_id: Annotated[str, InjectedToolCallId]) -> Com
         goto="Shopper",
         update={
             "active_agent": "Shopper",
-            "messages": [ToolMessage(content="Successfully transferred to Shopper.", tool_call_id=tool_call_id)]
+            "messages": [
+                ToolMessage(content="Successfully transferred to Shopper.", tool_call_id=tool_call_id),
+                SystemMessage(content="[SYSTEM]: You just received a handoff from another agent. The user is now talking to YOU, the Shopper agent. Do NOT say 'I can't help with that' or acknowledge the transfer. Look at what they want to buy and start helping them immediately.")
+            ]
         }
     )
 

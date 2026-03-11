@@ -17,6 +17,7 @@ export function useWebSocket(path, handlers = {}, autoConnect = true) {
   const wsRef = useRef(null);
   const handlersRef = useRef(handlers);
   const reconnectTimerRef = useRef(null);
+  const isMountedRef = useRef(false);
 
   // Keep handlers ref current without re-triggering effects
   useEffect(() => {
@@ -24,12 +25,19 @@ export function useWebSocket(path, handlers = {}, autoConnect = true) {
   }, [handlers]);
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    // Guard: don't connect if unmounted or already open
+    if (!isMountedRef.current) return;
+    if (wsRef.current?.readyState === WebSocket.OPEN ||
+        wsRef.current?.readyState === WebSocket.CONNECTING) return;
 
     setStatus('connecting');
     const ws = new WebSocket(`${WS_BASE_URL}${path}`);
 
     ws.onopen = () => {
+      if (!isMountedRef.current) {
+        ws.close();
+        return;
+      }
       setStatus('connected');
       handlersRef.current.onOpen?.();
     };
@@ -50,10 +58,12 @@ export function useWebSocket(path, handlers = {}, autoConnect = true) {
       handlersRef.current.onClose?.();
       wsRef.current = null;
 
-      // Auto-reconnect after 3 seconds
-      reconnectTimerRef.current = setTimeout(() => {
-        if (autoConnect) connect();
-      }, 3000);
+      // Auto-reconnect only if still mounted
+      if (isMountedRef.current && autoConnect) {
+        reconnectTimerRef.current = setTimeout(() => {
+          if (isMountedRef.current) connect();
+        }, 3000);
+      }
     };
 
     ws.onerror = (err) => {
@@ -65,7 +75,11 @@ export function useWebSocket(path, handlers = {}, autoConnect = true) {
 
   const disconnect = useCallback(() => {
     clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = null;
     if (wsRef.current) {
+      // Remove event handlers before closing to prevent reconnects
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
       wsRef.current.close();
       wsRef.current = null;
     }
@@ -87,9 +101,23 @@ export function useWebSocket(path, handlers = {}, autoConnect = true) {
   }, []);
 
   useEffect(() => {
+    isMountedRef.current = true;
+
+    // Close any stale connection before connecting fresh
+    if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    clearTimeout(reconnectTimerRef.current);
+
     if (autoConnect) connect();
-    return () => disconnect();
-  }, [autoConnect, connect, disconnect]);
+
+    return () => {
+      isMountedRef.current = false;
+      disconnect();
+    };
+  }, [path]); // Only reconnect when the path actually changes
 
   return { status, connect, disconnect, sendJson, sendBinary };
 }

@@ -16,6 +16,7 @@ export function useVoicePipeline() {
   const [mode, setMode] = useState('voice'); // 'voice' | 'text'
 
   const currentAiMessageRef = useRef('');
+  const currentUserMessageRef = useRef('');
   const isAudioPlayingRef = useRef(false);
 
   const { isPlaying, startCapture, stopCapture, playAudioChunk, clearPlaybackQueue } = useAudio();
@@ -40,21 +41,65 @@ export function useVoicePipeline() {
         break;
 
       case 'status':
-        if (msg.value === 'idle' && !isAudioPlayingRef.current) {
-          setPipelineStatus('idle');
-        } else if (msg.value !== 'idle') {
-          setPipelineStatus(msg.value);
+        // Barge-in: if user starts speaking while AI audio is playing, interrupt it
+        if (msg.value === 'recording' && isAudioPlayingRef.current) {
+          clearPlaybackQueue();
         }
+        if (msg.value === 'idle' && isAudioPlayingRef.current) {
+          // Don't override 'speaking' status while audio is still playing
+          break;
+        }
+        setPipelineStatus(msg.value);
         break;
 
       case 'transcript':
         if (msg.role === 'user') {
-          setMessages((prev) => [...prev, { role: 'user', text: msg.text }]);
-          currentAiMessageRef.current = '';
+          if (msg.partial) {
+            currentUserMessageRef.current = msg.text;
+            setMessages((prev) => {
+              const copy = [...prev];
+              const last = copy[copy.length - 1];
+              if (last && last.role === 'user' && last.partial) {
+                copy[copy.length - 1] = {
+                  ...last,
+                  text: currentUserMessageRef.current,
+                };
+              } else {
+                copy.push({
+                  role: 'user',
+                  text: currentUserMessageRef.current,
+                  partial: true,
+                });
+              }
+              return copy;
+            });
+          } else {
+            setMessages((prev) => {
+              const copy = [...prev];
+              const last = copy[copy.length - 1];
+              if (last && last.role === 'user' && last.partial) {
+                copy[copy.length - 1] = {
+                  role: 'user',
+                  text: msg.text,
+                  partial: false,
+                };
+              } else {
+                copy.push({
+                  role: 'user',
+                  text: msg.text,
+                  partial: false,
+                });
+              }
+              return copy;
+            });
+            currentUserMessageRef.current = '';
+            currentAiMessageRef.current = '';
+          }
         } else if (msg.role === 'ai') {
           if (msg.partial) {
-            // Accumulate partial AI responses
-            currentAiMessageRef.current += msg.text + ' ';
+            // Accumulate partial AI responses without adding custom spaces,
+            // as raw tokens directly from the LLM usually include appropriate spacing.
+            currentAiMessageRef.current += msg.text;
             setMessages((prev) => {
               const copy = [...prev];
               const last = copy[copy.length - 1];
@@ -120,7 +165,8 @@ export function useVoicePipeline() {
   const toggleVoice = useCallback(async () => {
     if (pipelineStatus === 'recording' || pipelineStatus === 'accumulating') {
       stopCapture();
-      setPipelineStatus('idle');
+      setPipelineStatus('processing');
+      sendJson({ type: "stop_audio" });
     } else {
       clearPlaybackQueue();
       setPipelineStatus('recording');
@@ -132,7 +178,7 @@ export function useVoicePipeline() {
         setPipelineStatus('idle');
       }
     }
-  }, [pipelineStatus, startCapture, stopCapture, sendBinary, clearPlaybackQueue]);
+  }, [pipelineStatus, startCapture, stopCapture, sendJson, sendBinary, clearPlaybackQueue]);
 
   /** Send a text message (text chat mode). */
   const sendTextMessage = useCallback((text) => {

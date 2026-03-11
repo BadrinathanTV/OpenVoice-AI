@@ -36,6 +36,7 @@ class VoiceSession:
         # so we don't replay stale conversation history from previous runs.
         self.config = {"configurable": {"thread_id": f"session_{uuid.uuid4().hex[:8]}"}}
         self.graph = self._build_graph()
+        self._cached_agent = "CustomerCare"  # Cache to avoid DB calls per token
         print(f"[VoiceSession] Thread: {self.config['configurable']['thread_id']}")
 
     def _build_graph(self):
@@ -81,10 +82,15 @@ class VoiceSession:
 
     @property
     def active_agent_name(self) -> str:
+        """Returns the cached agent name (fast, no DB call)."""
+        return self._cached_agent
+
+    def _refresh_agent_name(self) -> str:
+        """Reads the actual agent name from the DB and updates the cache."""
         state = self.graph.get_state(self.config)
         if state and state.values:
-            return state.values.get("active_agent", "CustomerCare")
-        return "CustomerCare"
+            self._cached_agent = state.values.get("active_agent", "CustomerCare")
+        return self._cached_agent
 
     def add_human_message(self, text: str):
         self.graph.update_state(self.config, {"messages": [HumanMessage(content=text)]})
@@ -116,13 +122,14 @@ class VoiceSession:
         Streams token chunks as they arrive from the LangGraph execution.
         """
         
-        agent_before = self.active_agent_name
+        agent_before = self._cached_agent
         print(f"\n[Agent: {agent_before}] Processing: \"{user_text}\"")
         
         # We only pass the new user message. The checkpointer retains the rest.
         inputs = {"messages": [HumanMessage(content=user_text)]}
         
         yield_buffer = ""
+        agent_nodes = {"CustomerCare", "Shopper", "OrderOps"}
         
         for msg, metadata in self.graph.stream(
             inputs, 
@@ -130,6 +137,11 @@ class VoiceSession:
             stream_mode="messages"
         ):
             node_name = metadata.get("langgraph_node")
+            
+            # Update cached agent name when we see tokens from a different agent node
+            if node_name in agent_nodes and node_name != self._cached_agent:
+                print(f"  ✓ Switched: {self._cached_agent} → {node_name}")
+                self._cached_agent = node_name
                 
             # Yield text content from AI messages for TTS
             if isinstance(msg, AIMessage) and msg.content:
@@ -142,11 +154,8 @@ class VoiceSession:
                 if tc_chunk.get("name"):
                     print(f"  [Calling: {tc_chunk['name']}]")
 
-        agent_after = self.active_agent_name
-        
-        # Only show the switch if the agent actually changed
-        if agent_after != agent_before:
-            print(f"  ✓ Switched: {agent_before} → {agent_after}")
+        # Sync cache with DB at the end to stay consistent
+        self._refresh_agent_name()
         
         if yield_buffer:
-            print(f"[{agent_after}]: {yield_buffer.strip()}")
+            print(f"[{self._cached_agent}]: {yield_buffer.strip()}")

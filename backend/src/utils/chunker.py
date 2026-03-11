@@ -2,16 +2,17 @@ import re
 
 class SentenceChunker:
     """
-    Buffers incoming text tokens and yields full sentences or logical clauses.
-    This prevents TTS engines from trying to synthesize half-words or disjointed grammar.
+    Buffers incoming text tokens and yields small word-group chunks
+    suitable for low-latency TTS. Yields at punctuation boundaries or
+    every `min_words` words, whichever comes first.
     Strips markdown formatting so TTS reads clean, natural text.
     """
-    def __init__(self, min_words=3):
+    def __init__(self, min_words=10):
         self.buffer = ""
         self.min_words = min_words
-        # Split on sentence-ending punctuation, commas, or colons, followed by a space or end of string.
-        # This makes chunks smaller, reducing TTS latency significantly.
-        self.split_pattern = re.compile(r'([.?!,:]+|\n)(\s|$)')
+        # Split on sentence-ending punctuation, commas, or colons,
+        # followed by a space or end of string.
+        self.punct_pattern = re.compile(r'([.?!,:]+|\n)(\s|$)')
 
     @staticmethod
     def _clean_for_tts(text: str) -> str:
@@ -32,31 +33,42 @@ class SentenceChunker:
 
     def process_token(self, token: str):
         """
-        Takes a token string. Yields a completed sentence if a boundary is crossed.
-        Skips tiny fragments (< min_words) by keeping them in the buffer.
+        Takes a token string. Yields completed chunks suitable for TTS.
+        Splits eagerly at punctuation, or every min_words words.
         """
         self.buffer += token
-        
+
         while True:
-            match = self.split_pattern.search(self.buffer)
-            if not match:
-                break
-                
-            end_idx = match.end()
-            raw_sentence = self.buffer[:end_idx].strip()
-            remaining = self.buffer[end_idx:]
-            
-            cleaned = self._clean_for_tts(raw_sentence)
-            
-            # If the fragment is too short, keep it in the buffer and wait for more
-            word_count = len(cleaned.split()) if cleaned else 0
-            if word_count < self.min_words:
-                # Only break out if there's no more matches to try
-                break
-            
-            self.buffer = remaining
-            if cleaned:
-                yield cleaned
+            cleaned_buf = self._clean_for_tts(self.buffer)
+            word_count = len(cleaned_buf.split()) if cleaned_buf else 0
+
+            # Strategy 1: Always split at punctuation if we have at least 1 word
+            punct_match = self.punct_pattern.search(self.buffer)
+            if punct_match and word_count >= 1:
+                end_idx = punct_match.end()
+                chunk = self.buffer[:end_idx].strip()
+                self.buffer = self.buffer[end_idx:]
+                cleaned = self._clean_for_tts(chunk)
+                if cleaned:
+                    yield cleaned
+                continue
+
+            # Strategy 2: Split at word boundaries if we have enough words
+            if word_count >= self.min_words:
+                raw_words = self.buffer.split()
+                # Take min_words words from the front
+                take_raw = ' '.join(raw_words[:self.min_words])
+                idx = self.buffer.find(take_raw)
+                if idx >= 0:
+                    end_pos = idx + len(take_raw)
+                    chunk = self.buffer[:end_pos].strip()
+                    self.buffer = self.buffer[end_pos:]
+                    cleaned = self._clean_for_tts(chunk)
+                    if cleaned:
+                        yield cleaned
+                    continue
+
+            break
 
     def flush(self):
         """

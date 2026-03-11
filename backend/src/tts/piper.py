@@ -6,7 +6,7 @@ import wave
 from src.core.interfaces import ITTS
 
 class TTSModel(ITTS):
-    def __init__(self, model_name="en_US-amy-medium"):
+    def __init__(self, model_name="en_US-amy-medium", speed=1.0):
         # We will use Piper TTS python bindings.
         # For simplicity in initialization, we download a default onnx model if missing.
         from piper.voice import PiperVoice
@@ -46,6 +46,12 @@ class TTSModel(ITTS):
         import torch
         use_cuda = torch.cuda.is_available()
         self.voice = PiperVoice.load(self.onnx_path, use_cuda=use_cuda)
+        
+        # Adjust voice speed
+        if speed != 1.0:
+            if hasattr(self.voice, 'config') and hasattr(self.voice.config, 'length_scale'):
+                current_scale = self.voice.config.length_scale or 1.0
+                self.voice.config.length_scale = current_scale / speed
 
 
     def synthesize(self, text: str) -> tuple[np.ndarray, int]:

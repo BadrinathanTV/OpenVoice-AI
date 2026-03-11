@@ -3,7 +3,7 @@
   "venv": ".venv",
   "executionEnvironments": [
     {
-      "root": "/home/badrinathan/Desktop/Projects/OpenVoice AI/backend",
+      "root": "/home/badrinathan/Desktop/Projects/OpenVoice AI",
       "extraPaths": [
         "/home/badrinathan/Desktop/Projects/OpenVoice AI/backend",
         "/home/badrinathan/Desktop/Projects/OpenVoice AI/.venv/lib/python3.13/site-packages"

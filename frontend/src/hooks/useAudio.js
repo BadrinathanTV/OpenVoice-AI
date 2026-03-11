@@ -15,6 +15,7 @@ export function useAudio() {
   const workletNodeRef = useRef(null);
   const playbackQueueRef = useRef([]);
   const isPlayingRef = useRef(false);
+  const currentSourceRef = useRef(null);
 
   /** Get or create the AudioContext (lazy init to avoid autoplay policy issues). */
   const getAudioContext = useCallback(() => {
@@ -127,8 +128,13 @@ export function useAudio() {
     const source = playCtx.createBufferSource();
     source.buffer = buffer;
     source.connect(playCtx.destination);
+    
+    currentSourceRef.current = source;
 
     source.onended = () => {
+      if (currentSourceRef.current === source) {
+          currentSourceRef.current = null;
+      }
       playCtx.close();
       isPlayingRef.current = false;
       if (playbackQueueRef.current.length > 0) {
@@ -144,6 +150,13 @@ export function useAudio() {
   /** Clear the playback queue (e.g. on interrupt). */
   const clearPlaybackQueue = useCallback(() => {
     playbackQueueRef.current = [];
+    if (currentSourceRef.current) {
+        try {
+            currentSourceRef.current.onended = null;
+            currentSourceRef.current.stop();
+        } catch(e) { /* ignore already stopped */ }
+        currentSourceRef.current = null;
+    }
     isPlayingRef.current = false;
     setIsPlaying(false);
   }, []);

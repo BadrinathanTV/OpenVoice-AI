@@ -32,7 +32,7 @@ def _build_pipeline():
     asr = ASRModel()
     tts_models = {
         "CustomerCare": TTSModel(model_name="en_GB-alba-medium"),
-        "Shopper": TTSModel(model_name="en_US-bryce-medium"),
+        "Shopper": TTSModel(model_name="en_US-bryce-medium", speed=1.20),
         "OrderOps": TTSModel(model_name="en_US-hfc_female-medium"),
     }
     pipeline = WebVoicePipeline(vad=vad, asr=asr, tts_models=tts_models)
@@ -98,36 +98,38 @@ async def websocket_voice(ws: WebSocket):
     from src.api.web_pipeline import WebVoicePipeline
     import copy
 
-    # Create a per-connection pipeline that shares heavy models but has own session
-    conn_pipeline = WebVoicePipeline(
-        vad=pipeline.vad,
-        asr=pipeline.asr,
-        tts_models=pipeline.tts_models,
-    )
-    thread_id = conn_pipeline.init_session()
-
-    await ws.send_json({
-        "type": "session",
-        "threadId": thread_id,
-        "agent": conn_pipeline.active_agent_name,
-    })
-
-    async def send_callback(msg):
-        """Send pipeline results back to the browser."""
-        if msg["type"] == "audio":
-            # Send audio as base64-encoded JSON so we can include metadata
-            audio_b64 = base64.b64encode(msg["data"]).decode("ascii")
-            await ws.send_json({
-                "type": "audio",
-                "data": audio_b64,
-                "sampleRate": msg["sample_rate"],
-            })
-        else:
-            await ws.send_json(msg)
-
     try:
+        conn_pipeline = WebVoicePipeline(
+            vad=pipeline.vad,
+            asr=pipeline.asr,
+            tts_models=pipeline.tts_models,
+        )
+        thread_id = conn_pipeline.init_session()
+
+        await ws.send_json({
+            "type": "session",
+            "threadId": thread_id,
+            "agent": conn_pipeline.active_agent_name,
+        })
+
+        async def send_callback(msg):
+            """Send pipeline results back to the browser."""
+            if msg["type"] == "audio":
+                # Send audio as base64-encoded JSON so we can include metadata
+                audio_b64 = base64.b64encode(msg["data"]).decode("ascii")
+                await ws.send_json({
+                    "type": "audio",
+                    "data": audio_b64,
+                    "sampleRate": msg["sample_rate"],
+                })
+            else:
+                await ws.send_json(msg)
+
         while True:
             data = await ws.receive()
+
+            if data.get("type") == "websocket.disconnect":
+                break
 
             if "bytes" in data and data["bytes"]:
                 # Binary audio chunk from the browser mic
@@ -137,12 +139,33 @@ async def websocket_voice(ws: WebSocket):
                 if result["status"] == "speech_detected":
                     await ws.send_json({"type": "status", "value": "recording"})
 
+                elif result["status"] == "speech_partial":
+                    # Stream intermediate ASR transcript back to the UI
+                    text = await asyncio.get_event_loop().run_in_executor(
+                        None, conn_pipeline.transcribe, result["audio"]
+                    )
+                    if text and len(text.strip()) > 0:
+                        await ws.send_json({
+                            "type": "transcript",
+                            "role": "user",
+                            "text": text,
+                            "partial": True
+                        })
+
                 elif result["status"] == "speech_end":
                     await ws.send_json({"type": "status", "value": "processing"})
                     text = await asyncio.get_event_loop().run_in_executor(
                         None, conn_pipeline.transcribe, result["audio"]
                     )
                     if text and len(text.strip()) >= 2:
+                        # Send the final locked-in transcript
+                        await ws.send_json({
+                            "type": "transcript",
+                            "role": "user",
+                            "text": text,
+                            "partial": False
+                        })
+                        # Generate the AI response using the final text
                         await conn_pipeline.generate_response(text, send_callback)
                     else:
                         await ws.send_json({"type": "status", "value": "idle"})
@@ -156,12 +179,12 @@ async def websocket_voice(ws: WebSocket):
                         await conn_pipeline.generate_response(user_text, send_callback)
 
     except WebSocketDisconnect:
-        print(f"[Server] Client disconnected (thread: {thread_id})")
+        print(f"[Server] Client disconnected globally")
     except Exception as e:
         print(f"[Server] WebSocket error: {e}")
         try:
             await ws.close()
-        except Exception:
+        except:
             pass
 
 
@@ -174,31 +197,31 @@ async def websocket_chat(ws: WebSocket):
 
     from src.api.web_pipeline import WebVoicePipeline
 
-    conn_pipeline = WebVoicePipeline(
-        vad=pipeline.vad,
-        asr=pipeline.asr,
-        tts_models=pipeline.tts_models,
-    )
-    thread_id = conn_pipeline.init_session()
-
-    await ws.send_json({
-        "type": "session",
-        "threadId": thread_id,
-        "agent": conn_pipeline.active_agent_name,
-    })
-
-    async def send_callback(msg):
-        if msg["type"] == "audio":
-            audio_b64 = base64.b64encode(msg["data"]).decode("ascii")
-            await ws.send_json({
-                "type": "audio",
-                "data": audio_b64,
-                "sampleRate": msg["sample_rate"],
-            })
-        else:
-            await ws.send_json(msg)
-
     try:
+        conn_pipeline = WebVoicePipeline(
+            vad=pipeline.vad,
+            asr=pipeline.asr,
+            tts_models=pipeline.tts_models,
+        )
+        thread_id = conn_pipeline.init_session()
+
+        await ws.send_json({
+            "type": "session",
+            "threadId": thread_id,
+            "agent": conn_pipeline.active_agent_name,
+        })
+
+        async def send_callback(msg):
+            if msg["type"] == "audio":
+                audio_b64 = base64.b64encode(msg["data"]).decode("ascii")
+                await ws.send_json({
+                    "type": "audio",
+                    "data": audio_b64,
+                    "sampleRate": msg["sample_rate"],
+                })
+            else:
+                await ws.send_json(msg)
+
         while True:
             raw = await ws.receive_text()
             msg = json.loads(raw)
@@ -206,10 +229,10 @@ async def websocket_chat(ws: WebSocket):
             if user_text:
                 await conn_pipeline.generate_response(user_text, send_callback)
     except WebSocketDisconnect:
-        print(f"[Server] Chat client disconnected (thread: {thread_id})")
+        print(f"[Server] Chat client disconnected globally")
     except Exception as e:
         print(f"[Server] Chat WebSocket error: {e}")
         try:
             await ws.close()
-        except Exception:
+        except:
             pass

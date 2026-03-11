@@ -1,6 +1,13 @@
 {
-  "python.defaultInterpreterPath": "/home/badrinathan/Desktop/Projects/OpenVoice AI/backend/.venv/bin/python",
+  "python.defaultInterpreterPath": "/home/badrinathan/Desktop/Projects/OpenVoice AI/.venv/bin/python",
+  "python.terminal.activateEnvironment": true,
+  "python.analysis.pythonPath": "/home/badrinathan/Desktop/Projects/OpenVoice AI/.venv/bin/python",
+  "python.analysis.venvPath": "/home/badrinathan/Desktop/Projects/OpenVoice AI",
   "python.analysis.extraPaths": [
-    "/home/badrinathan/Desktop/Projects/OpenVoice AI/backend"
-  ]
+    "/home/badrinathan/Desktop/Projects/OpenVoice AI/backend",
+    "/home/badrinathan/Desktop/Projects/OpenVoice AI/.venv/lib/python3.13/site-packages"
+  ],
+  "python.analysis.useLibraryCodeForTypes": true,
+  "python.analysis.autoSearchPaths": true,
+  "python.analysis.diagnosticMode": "workspace"
 }
