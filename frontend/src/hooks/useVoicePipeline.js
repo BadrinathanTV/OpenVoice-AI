@@ -1,12 +1,13 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useWebSocket } from './useWebSocket';
+import { useWebRTC } from './useWebRTC';
 import { useAudio } from './useAudio';
 import { DEFAULT_AGENT } from '../config/agents';
 
 /**
- * Orchestration hook — coordinates WebSocket, audio, and UI state.
+ * Orchestration hook — coordinates realtime transport, audio, and UI state.
  * Follows the Interface Segregation Principle: exposes a clean API to components
- * without leaking implementation details of WS or Audio internals.
+ * without leaking implementation details of the transport or audio internals.
  */
 export function useVoicePipeline() {
   const [activeAgent, setActiveAgent] = useState(DEFAULT_AGENT);
@@ -166,22 +167,59 @@ export function useVoicePipeline() {
         playAudioChunk(msg.data, msg.sampleRate);
         break;
 
+      case 'error':
+        clearPlaybackQueue();
+        commitPendingAiMessage();
+        currentUserMessageRef.current = '';
+        setPipelineStatus('idle');
+        setMessages((prev) => {
+          const next = [...prev];
+          const errorText = msg.message || 'Something went wrong in the voice pipeline.';
+          const last = next[next.length - 1];
+          if (last && last.role === 'ai' && last.text === errorText) {
+            return next;
+          }
+          next.push({
+            role: 'ai',
+            text: errorText,
+            agent: activeAgent,
+            partial: false,
+          });
+          return next;
+        });
+        break;
+
       default:
         break;
     }
-  }, [clearPlaybackQueue, commitPendingAiMessage, playAudioChunk]);
+  }, [activeAgent, clearPlaybackQueue, commitPendingAiMessage, playAudioChunk]);
 
-  const wsHandlers = {
+  const transportHandlers = {
     onMessage: handleMessage,
-    onOpen: () => console.log('[Pipeline] WebSocket connected'),
-    onClose: () => console.log('[Pipeline] WebSocket disconnected'),
+    onOpen: () => console.log('[Pipeline] Realtime transport connected'),
+    onClose: () => console.log('[Pipeline] Realtime transport disconnected'),
   };
 
-  const { status: wsStatus, sendJson, sendBinary } = useWebSocket(
-    mode === 'voice' ? '/ws/voice' : '/ws/chat',
-    wsHandlers,
-    true
+  const webrtcVoice = useWebRTC(
+    '/api/webrtc/offer',
+    transportHandlers,
+    mode === 'voice'
   );
+  const websocketChat = useWebSocket(
+    '/ws/chat',
+    transportHandlers,
+    mode === 'text'
+  );
+
+  const connectionStatus = mode === 'voice'
+    ? webrtcVoice.status
+    : websocketChat.status;
+  const sendJson = mode === 'voice'
+    ? webrtcVoice.sendJson
+    : websocketChat.sendJson;
+  const sendBinary = mode === 'voice'
+    ? webrtcVoice.sendBinary
+    : websocketChat.sendBinary;
 
   /** Toggle voice capture on/off. */
   const toggleVoice = useCallback(async () => {
@@ -230,7 +268,7 @@ export function useVoicePipeline() {
     messages,
     threadId,
     mode,
-    wsStatus,
+    connectionStatus,
     isPlaying,
 
     // Actions

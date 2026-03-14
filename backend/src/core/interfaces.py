@@ -1,6 +1,20 @@
 from abc import ABC, abstractmethod
-from typing import Iterator, Iterable, Tuple
+from dataclasses import dataclass
+from typing import Any, Iterable, Tuple
+
 import numpy as np
+
+
+@dataclass
+class ASRStreamHandle:
+    """
+    Mutable per-stream ASR state that lives at the connection/pipeline level.
+    Implementations can store backend-specific objects in `backend_state`.
+    """
+    backend_state: Any
+    text: str = ""
+    language: str = ""
+
 
 class IVAD(ABC):
     @abstractmethod
@@ -13,6 +27,29 @@ class IASR(ABC):
     def transcribe(self, audio_array: np.ndarray) -> str:
         """Transcribes the given audio array into text."""
         pass
+
+    @property
+    def supports_streaming(self) -> bool:
+        """Whether this ASR implementation supports true incremental streaming."""
+        return False
+
+    def create_stream(
+        self,
+        context: str = "",
+        language: str | None = None,
+        chunk_size_sec: float = 2.0,
+    ) -> ASRStreamHandle:
+        raise NotImplementedError("Streaming ASR is not supported by this backend.")
+
+    def stream_transcribe(
+        self,
+        audio_chunk: np.ndarray,
+        stream: ASRStreamHandle,
+    ) -> str:
+        raise NotImplementedError("Streaming ASR is not supported by this backend.")
+
+    def finish_stream(self, stream: ASRStreamHandle) -> str:
+        raise NotImplementedError("Streaming ASR is not supported by this backend.")
 
 class ITTS(ABC):
     @abstractmethod

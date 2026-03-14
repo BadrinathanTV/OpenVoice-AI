@@ -1,5 +1,5 @@
 /**
- * ConnectionStatus — Header badge showing WebSocket connection state.
+ * ConnectionStatus — Header badge showing realtime transport state.
  * Follows SRP: pure presentational component.
  */
 export function ConnectionStatus({ status }) {

@@ -20,7 +20,11 @@ if not exist "backend\.env" (
 
 echo 📦 Starting Backend Server in a new window...
 cd backend
-start "OpenVoice Backend" cmd /k "uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000"
+set "ACCESS_LOG_FLAG=--no-access-log"
+if "%OPENVOICE_ACCESS_LOG%"=="1" set "ACCESS_LOG_FLAG="
+set "UVICORN_LOG_LEVEL=warning"
+if not "%OPENVOICE_UVICORN_LOG_LEVEL%"=="" set "UVICORN_LOG_LEVEL=%OPENVOICE_UVICORN_LOG_LEVEL%"
+start "OpenVoice Backend" cmd /k "uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000 --log-level %UVICORN_LOG_LEVEL% %ACCESS_LOG_FLAG%"
 cd ..
 
 :: 2. Frontend Check and Start

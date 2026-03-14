@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python&logoColor=white" />
+  <img src="https://img.shields.io/badge/Python-3.12-blue?logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white" />
   <img src="https://img.shields.io/badge/FastAPI-0.135-009688?logo=fastapi&logoColor=white" />
   <img src="https://img.shields.io/badge/LangGraph-Swarm-orange?logo=langchain&logoColor=white" />
@@ -155,7 +155,7 @@ OpenVoice AI/
 
 | Tool | Version | Purpose |
 |---|---|---|
-| **Python** | 3.11+ | Backend runtime |
+| **Python** | 3.12.x | Backend runtime |
 | **uv** | Latest | Python package manager |
 | **Node.js** | 18+ | Frontend tooling |
 | **MongoDB** | 4.4+ | Session persistence |
@@ -185,12 +185,14 @@ nano .env
 OPENAI_API_KEY=sk-your-openai-key
 GROQ_API_KEY=gsk_your-groq-key
 ASR_MODEL_PATH=/path/to/Qwen3-ASR-0.6B
+ASR_BACKEND=transformers
+ASR_STREAMING_CHUNK_SIZE_SEC=0.64
 DATABASE_URL=mongodb://localhost:27017/
 ```
 
-**Install dependencies and start:**
+**Install dependencies and start with `uv` only:**
 ```bash
-# Run this once from the repository root
+# Run this from the repository root
 uv sync
 
 # Then start the backend from backend/
@@ -198,10 +200,27 @@ cd backend
 uv run --project .. uvicorn src.api.server:app --host 0.0.0.0 --port 8000
 ```
 
+`.python-version` pins the repo to Python `3.12`, so cloud machines and client machines should use that same interpreter line for the most reliable install.
+
 The first run will:
 - Download Qwen3-ASR-0.6B model
 - Download Piper TTS voice models (~50MB each)
 - Install all Python dependencies
+
+To enable Qwen streaming ASR, switch to the vLLM backend:
+
+```env
+ASR_BACKEND=vllm
+ASR_STREAMING_CHUNK_SIZE_SEC=0.64
+```
+
+Install the streaming stack with `uv` before starting the backend:
+
+```bash
+uv sync --extra streaming-asr
+```
+
+The `streaming-asr` extra is intended for Linux GPU environments, which matches the current CUDA-based deployment path for this project.
 
 ### 3. Frontend Setup
 
@@ -348,6 +367,9 @@ flowchart TD
 | `OPENAI_API_KEY` | ✅ | — | OpenAI API key for GPT-4o-mini |
 | `GROQ_API_KEY` | ❌ | — | Groq API key (alternative LLM provider) |
 | `ASR_MODEL_PATH` | ❌ | `Qwen3-ASR-0.6B` | Path to local ASR model |
+| `ASR_BACKEND` | ❌ | `transformers` | ASR backend: `transformers` or `vllm` |
+| `ASR_STREAMING_CHUNK_SIZE_SEC` | ❌ | `0.64` | Streaming ASR decode chunk size in seconds |
+| `ASR_ALLOW_BACKEND_FALLBACK` | ❌ | `true` | Fall back to transformers if vLLM ASR fails to initialize |
 | `DATABASE_URL` | ❌ | `mongodb://localhost:27017/` | MongoDB connection URL |
 
 ### Adding a New Agent

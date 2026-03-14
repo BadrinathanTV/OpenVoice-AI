@@ -3,7 +3,7 @@ name = "openvoice-ai"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "faster-whisper>=1.2.1",
     "langchain>=1.2.10",
@@ -11,7 +11,7 @@ dependencies = [
     "langchain-openai>=1.1.10",
     "langchain-core>=0.2.10",
     "litellm[proxy]>=1.79.2",
-    "numpy>=2.4.2",
+    "numpy>=1.26,<2.3",
     "openai>=2.24.0",
     "piper-tts>=1.4.1",
     "python-dotenv>=1.2.2",
@@ -19,14 +19,26 @@ dependencies = [
     "silero-vad>=6.2.1",
     "sounddevice>=0.5.5",
     "soundfile>=0.13.1",
-    "torch>=2.10.0",
-    "torchaudio>=2.10.0",
+    "torch==2.9.1",
+    "torchaudio==2.9.1",
     "onnxruntime-gpu>=1.24.2",
     "langchain-groq>=1.1.2",
-    "qwen-asr>=0.0.1",
+    "qwen-asr>=0.0.6",
+    "langid>=1.1.6",
     "transformers>=4.45.0",
     "huggingface-hub>=0.34.0,<1.0",
     "langgraph-checkpoint-mongodb>=0.3.1",
     "pymongo>=4.11.1",
     "fastapi>=0.115.0",
+    "aiortc>=1.9.0",
+]
+
+[project.optional-dependencies]
+streaming-asr = [
+    "qwen-asr[vllm]>=0.0.6",
+]
+
+[tool.uv]
+environments = [
+    "sys_platform == 'linux'",
 ]

@@ -1,13 +1,14 @@
 import os
-import requests
 import base64
-import wave
 import io
+import wave
+
 import numpy as np
+import requests
 from src.core.interfaces import ITTS
 
 class SarvamTTS(ITTS):
-    def __init__(self, speaker="meera"):
+    def __init__(self, speaker: str = "meera") -> None:
         super().__init__()
         self.speaker = speaker
         self.api_key = os.getenv("SARVAM_API_KEY", "")
@@ -40,12 +41,13 @@ class SarvamTTS(ITTS):
         }
 
         try:
-            response = requests.post(self.url, json=payload, headers=headers)
+            response = requests.post(self.url, json=payload, headers=headers, timeout=30)
             response.raise_for_status()
             
             data = response.json()
-            if "audios" in data and len(data["audios"]) > 0:
-                base64_audio = data["audios"][0]
+            audios = data.get("audios", [])
+            if isinstance(audios, list) and audios:
+                base64_audio = audios[0]
                 
                 # Decode base64 to WAV bytes
                 audio_bytes = base64.b64decode(base64_audio)
@@ -67,6 +69,7 @@ class SarvamTTS(ITTS):
                 
         except Exception as e:
             print(f"[SarvamTTS] API Error: {e}")
-            if hasattr(e, 'response') and e.response is not None:
-                print(f"Details: {e.response.text}")
+            response = getattr(e, "response", None)
+            if response is not None:
+                print(f"Details: {response.text}")
             return np.array([], dtype=np.float32), 16000

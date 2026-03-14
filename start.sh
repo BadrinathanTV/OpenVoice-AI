@@ -24,7 +24,12 @@ fi
 
 echo -e "${GREEN}📦 Starting Backend Server...${NC}"
 cd backend
-uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000 &
+ACCESS_LOG_FLAG="--no-access-log"
+if [ "${OPENVOICE_ACCESS_LOG:-0}" = "1" ]; then
+    ACCESS_LOG_FLAG=""
+fi
+UVICORN_LOG_LEVEL="${OPENVOICE_UVICORN_LOG_LEVEL:-warning}"
+uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000 --log-level "${UVICORN_LOG_LEVEL}" ${ACCESS_LOG_FLAG} &
 BACKEND_PID=$!
 cd ..
 

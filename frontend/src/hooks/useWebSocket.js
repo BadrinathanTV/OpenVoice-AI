@@ -2,10 +2,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { WS_BASE_URL } from '../config/agents';
 
 /**
- * Custom hook for WebSocket connection lifecycle management.
- * Follows SRP: only manages WebSocket connection, not business logic.
+ * Custom hook for realtime connection lifecycle management.
+ * Follows SRP: only manages the transport channel, not business logic.
  *
- * @param {string} path - WebSocket endpoint path (e.g., '/ws/voice' or '/ws/chat')
+ * @param {string} path - Transport endpoint path (e.g., '/ws/voice' or '/ws/chat')
  * @param {object} handlers - Message handler callbacks
  * @param {function} handlers.onMessage - Called with parsed JSON messages
  * @param {function} handlers.onOpen - Called when connection opens
@@ -19,6 +19,7 @@ export function useWebSocket(path, handlers = {}, autoConnect = true) {
   const reconnectTimerRef = useRef(null);
   const isMountedRef = useRef(false);
   const connectRef = useRef(null);
+  const connectionIdRef = useRef(0);
 
   // Keep handlers ref current without re-triggering effects
   useEffect(() => {
@@ -32,9 +33,15 @@ export function useWebSocket(path, handlers = {}, autoConnect = true) {
         wsRef.current?.readyState === WebSocket.CONNECTING) return;
 
     setStatus('connecting');
+    const connectionId = ++connectionIdRef.current;
     const ws = new WebSocket(`${WS_BASE_URL}${path}`);
+    wsRef.current = ws;
 
     ws.onopen = () => {
+      if (connectionId !== connectionIdRef.current || wsRef.current !== ws) {
+        ws.close();
+        return;
+      }
       if (!isMountedRef.current) {
         ws.close();
         return;
@@ -44,17 +51,23 @@ export function useWebSocket(path, handlers = {}, autoConnect = true) {
     };
 
     ws.onmessage = (event) => {
+      if (connectionId !== connectionIdRef.current || wsRef.current !== ws) {
+        return;
+      }
       if (typeof event.data === 'string') {
         try {
           const msg = JSON.parse(event.data);
           handlersRef.current.onMessage?.(msg);
         } catch (e) {
-          console.error('[WS] Failed to parse message:', e);
+          console.error('[Transport] Failed to parse message:', e);
         }
       }
     };
 
     ws.onclose = () => {
+      if (connectionId !== connectionIdRef.current) {
+        return;
+      }
       setStatus('disconnected');
       handlersRef.current.onClose?.();
       wsRef.current = null;
@@ -70,10 +83,11 @@ export function useWebSocket(path, handlers = {}, autoConnect = true) {
     };
 
     ws.onerror = (err) => {
-      console.error('[WS] Error:', err);
+      if (connectionId !== connectionIdRef.current || wsRef.current !== ws) {
+        return;
+      }
+      console.error('[Transport] Error:', err);
     };
-
-    wsRef.current = ws;
   }, [path, autoConnect]);
 
   useEffect(() => {
@@ -81,6 +95,7 @@ export function useWebSocket(path, handlers = {}, autoConnect = true) {
   }, [connect]);
 
   const disconnect = useCallback(() => {
+    connectionIdRef.current += 1;
     clearTimeout(reconnectTimerRef.current);
     reconnectTimerRef.current = null;
     if (wsRef.current) {

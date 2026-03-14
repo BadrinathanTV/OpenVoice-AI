@@ -19,7 +19,7 @@ function App() {
     pipelineStatus,
     messages,
     mode,
-    wsStatus,
+    connectionStatus,
     toggleVoice,
     sendTextMessage,
     switchMode,
@@ -37,7 +37,7 @@ function App() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <ModeToggle mode={mode} onSwitch={switchMode} />
-          <ConnectionStatus status={wsStatus} />
+          <ConnectionStatus status={connectionStatus} />
         </div>
       </header>
 
@@ -50,7 +50,7 @@ function App() {
           <MicButton
             isActive={isRecording}
             onClick={toggleVoice}
-            disabled={wsStatus !== 'connected'}
+            disabled={connectionStatus !== 'connected'}
           />
         )}
 
@@ -58,7 +58,7 @@ function App() {
           <div style={{ marginTop: 48, width: '100%', maxWidth: 400 }}>
             <TextInputBar
               onSend={sendTextMessage}
-              disabled={wsStatus !== 'connected'}
+              disabled={connectionStatus !== 'connected'}
             />
           </div>
         )}

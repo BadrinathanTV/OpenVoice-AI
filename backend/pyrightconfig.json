@@ -1,12 +1,17 @@
 {
   "venvPath": "/home/badrinathan/Desktop/Projects/OpenVoice AI",
   "venv": ".venv",
+  "typeCheckingMode": "basic",
+  "reportMissingTypeStubs": "none",
+  "reportUnknownArgumentType": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownVariableType": "none",
   "executionEnvironments": [
     {
       "root": "/home/badrinathan/Desktop/Projects/OpenVoice AI/backend",
       "extraPaths": [
         "/home/badrinathan/Desktop/Projects/OpenVoice AI/backend",
-        "/home/badrinathan/Desktop/Projects/OpenVoice AI/.venv/lib/python3.13/site-packages"
+        "/home/badrinathan/Desktop/Projects/OpenVoice AI/.venv/lib/python3.12/site-packages"
       ]
     }
   ]

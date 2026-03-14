@@ -1,5 +1,10 @@
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+from collections.abc import Callable, Iterator, Sequence
+from typing import Any, cast
+
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 import os
 import uuid
@@ -12,14 +17,14 @@ from src.agents.specialized.shopper import get_shopper_agent, search_catalog, tr
 from src.agents.specialized.order_ops import get_order_ops_agent, check_order_status, transfer_to_customer_care as oo_to_cc, transfer_to_shopper as oo_to_shopper
 
 class VoiceSession:
-    def __init__(self, db_url=None):
+    def __init__(self, db_url: str | None = None) -> None:
         """
         Manages the independent agent sessions using LangGraph.
         """
         print("[VoiceSession] Initializing LangGraph Swarm...")
         
         # Tools grouped for the ToolNode
-        self.tools = [
+        self.tools: list[Callable[..., Any]] = [
             lookup_policy, search_catalog, check_order_status,
             transfer_to_order_ops, transfer_to_shopper,
             shopper_to_cc, shopper_to_oo,
@@ -34,12 +39,15 @@ class VoiceSession:
         
         # Build the graph with a FRESH thread_id every time the session starts,
         # so we don't replay stale conversation history from previous runs.
-        self.config = {"configurable": {"thread_id": f"session_{uuid.uuid4().hex[:8]}"}}
+        self.config: RunnableConfig = cast(
+            RunnableConfig,
+            {"configurable": {"thread_id": f"session_{uuid.uuid4().hex[:8]}"}},
+        )
         self.graph = self._build_graph()
         self._cached_agent = "CustomerCare"  # Cache to avoid DB calls per token
         print(f"[VoiceSession] Thread: {self.config['configurable']['thread_id']}")
 
-    def _build_graph(self):
+    def _build_graph(self) -> CompiledStateGraph:
         builder = StateGraph(VoiceState)
         
         # Nodes
@@ -49,19 +57,23 @@ class VoiceSession:
         builder.add_node("tools", ToolNode(self.tools))
         
         # Route from START to the currently active agent
-        def route_start(state):
+        def route_start(state: VoiceState) -> str:
             return state.get("active_agent", "CustomerCare")
             
         builder.add_conditional_edges(START, route_start)
         
         # After an agent responds, check if it wants to call tools or we're done
-        def route_node(state):
-            messages = state.get("messages", [])
+        def route_node(state: VoiceState) -> str:
+            messages = cast(Sequence[BaseMessage], state.get("messages", []))
             if not messages:
                 return END
             last_message = messages[-1]
-            if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-                tool_names = [tc['name'] for tc in last_message.tool_calls]
+            tool_calls = getattr(last_message, "tool_calls", None)
+            if tool_calls:
+                tool_names = [
+                    call.get("name", "")
+                    for call in cast(list[dict[str, Any]], tool_calls)
+                ]
                 print(f"  → Tool calls: {tool_names}")
                 return "tools"
             return END
@@ -71,7 +83,7 @@ class VoiceSession:
         builder.add_conditional_edges("OrderOps", route_node)
         
         # After tools finish, route to the (possibly new) active agent
-        def route_tools(state):
+        def route_tools(state: VoiceState) -> str:
             active = state.get("active_agent", "CustomerCare")
             print(f"  → Routed to: {active}")
             return active
@@ -87,28 +99,30 @@ class VoiceSession:
 
     def _refresh_agent_name(self) -> str:
         """Reads the actual agent name from the DB and updates the cache."""
-        state = self.graph.get_state(self.config)
-        if state and state.values:
-            self._cached_agent = state.values.get("active_agent", "CustomerCare")
+        snapshot = self.graph.get_state(self.config)
+        values = cast(dict[str, Any] | None, snapshot.values if snapshot else None)
+        if values:
+            self._cached_agent = cast(str, values.get("active_agent", "CustomerCare"))
         return self._cached_agent
 
-    def add_human_message(self, text: str):
+    def add_human_message(self, text: str) -> None:
         self.graph.update_state(self.config, {"messages": [HumanMessage(content=text)]})
         
-    def add_ai_message(self, text: str):
+    def add_ai_message(self, text: str) -> None:
         self.graph.update_state(self.config, {"messages": [AIMessage(content=text)]})
 
-    def update_last_ai_message(self, text: str):
+    def update_last_ai_message(self, text: str) -> None:
         """
         Replaces the most recent AIMessage in the graph state with the actual spoken text.
         This ensures the LLM knows exactly where it was interrupted.
         """
-        state = self.graph.get_state(self.config)
-        if not state or not state.values.get("messages"):
+        snapshot = self.graph.get_state(self.config)
+        values = cast(dict[str, Any] | None, snapshot.values if snapshot else None)
+        messages = cast(list[BaseMessage], values.get("messages", [])) if values else []
+        if not messages:
             self.add_ai_message(text)
             return
-            
-        messages = state.values["messages"]
+
         last_msg = messages[-1]
         
         if isinstance(last_msg, AIMessage) and not getattr(last_msg, "tool_calls", None):
@@ -117,7 +131,7 @@ class VoiceSession:
         else:
             self.add_ai_message(text)
 
-    def stream_response(self, user_text: str):
+    def stream_response(self, user_text: str) -> Iterator[str]:
         """
         Streams token chunks as they arrive from the LangGraph execution.
         """
@@ -126,16 +140,23 @@ class VoiceSession:
         print(f"\n[Agent: {agent_before}] Processing: \"{user_text}\"")
         
         # We only pass the new user message. The checkpointer retains the rest.
-        inputs = {"messages": [HumanMessage(content=user_text)]}
+        inputs: dict[str, list[BaseMessage]] = {
+            "messages": [HumanMessage(content=user_text)]
+        }
         
         yield_buffer = ""
         agent_nodes = {"CustomerCare", "Shopper", "OrderOps"}
-        
-        for msg, metadata in self.graph.stream(
-            inputs, 
-            config=self.config,
-            stream_mode="messages"
-        ):
+
+        stream_iter = cast(
+            Iterator[tuple[BaseMessage, dict[str, Any]]],
+            self.graph.stream(
+                inputs,
+                config=self.config,
+                stream_mode="messages",
+            ),
+        )
+
+        for msg, metadata in stream_iter:
             node_name = metadata.get("langgraph_node")
             
             # Update cached agent name when we see tokens from a different agent node
@@ -144,15 +165,17 @@ class VoiceSession:
                 self._cached_agent = node_name
                 
             # Yield text content from AI messages for TTS
-            if isinstance(msg, AIMessage) and msg.content:
+            if isinstance(msg, AIMessage) and isinstance(msg.content, str) and msg.content:
                 yield msg.content
                 yield_buffer += msg.content
                 
             # Log tool call chunks
-            if hasattr(msg, "tool_call_chunks") and msg.tool_call_chunks:
-                tc_chunk = msg.tool_call_chunks[0]
-                if tc_chunk.get("name"):
-                    print(f"  [Calling: {tc_chunk['name']}]")
+            tool_call_chunks = getattr(msg, "tool_call_chunks", None)
+            if tool_call_chunks:
+                tc_chunk = cast(dict[str, Any], tool_call_chunks[0])
+                tool_name = tc_chunk.get("name")
+                if tool_name:
+                    print(f"  [Calling: {tool_name}]")
 
         # Sync cache with DB at the end to stay consistent
         self._refresh_agent_name()

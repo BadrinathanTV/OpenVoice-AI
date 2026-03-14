@@ -4,7 +4,12 @@ from silero_vad import load_silero_vad
 from src.core.interfaces import IVAD
 
 class SileroVAD(IVAD):
-    def __init__(self, threshold=0.7, volume_threshold=0.02, sampling_rate=16000):
+    def __init__(
+        self,
+        threshold: float = 0.7,
+        volume_threshold: float = 0.02,
+        sampling_rate: int = 16000,
+    ) -> None:
         self.sampling_rate = sampling_rate
         self.threshold = threshold
         self.volume_threshold = volume_threshold
@@ -20,7 +25,7 @@ class SileroVAD(IVAD):
         """
         # 1. Volume Noise Gate (RMS Threshold)
         # Calculate Root Mean Square energy of the audio chunk to ignore distant/quiet background chatter
-        rms = np.sqrt(np.mean(np.square(audio_chunk)))
+        rms = float(np.sqrt(np.mean(np.square(audio_chunk))))
         if rms < self.volume_threshold:
             return False
 

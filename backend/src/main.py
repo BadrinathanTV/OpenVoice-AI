@@ -1,7 +1,3 @@
-import os
-import sys
-
-from src.utils.chunker import SentenceChunker
 from src.audio.io import AudioIO
 from src.vad.silero import SileroVAD
 from src.asr.whisper import ASRModel
@@ -9,7 +5,7 @@ from src.llm.client import LLMModel
 from src.tts.piper import TTSModel
 from src.core.pipeline import VoicePipeline
 
-def main():
+def main() -> None:
     audio_io = AudioIO(sample_rate=16000, chunk_duration_ms=32)
     vad = SileroVAD()
     asr = ASRModel()
