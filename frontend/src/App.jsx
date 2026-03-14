@@ -59,7 +59,7 @@ function App() {
                   <MicButton
                     isActive={isRecording}
                     onClick={toggleVoice}
-                    disabled={wsStatus !== 'connected'}
+                    disabled={connectionStatus !== 'connected'}
                   />
                 )}
               </div>
@@ -120,7 +120,7 @@ function App() {
             {mode === 'text' && (
               <TextInputBar
                 onSend={sendTextMessage}
-                disabled={wsStatus !== 'connected'}
+                disabled={connectionStatus !== 'connected'}
               />
             )}
           </div>

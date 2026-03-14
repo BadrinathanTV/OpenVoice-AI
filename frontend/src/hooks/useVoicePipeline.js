@@ -198,7 +198,7 @@ export function useVoicePipeline() {
 
   const { status: wsStatus, sendJson, sendBinary } = useWebSocket(
     mode === 'voice' ? '/ws/voice' : '/ws/chat',
-    wsHandlers,
+    transportHandlers,
     true
   );
 
@@ -245,7 +245,7 @@ export function useVoicePipeline() {
     messages,
     threadId,
     mode,
-    connectionStatus,
+    connectionStatus: wsStatus,
     isPlaying,
     isUserSpeaking,
     toggleVoice,
