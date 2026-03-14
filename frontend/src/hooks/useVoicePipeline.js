@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useWebSocket } from './useWebSocket';
 import { useWebRTC } from './useWebRTC';
 import { useAudio } from './useAudio';
 import { DEFAULT_AGENT } from '../config/agents';
@@ -196,8 +195,8 @@ export function useVoicePipeline() {
     onClose: () => console.log('[Pipeline] Realtime transport disconnected'),
   };
 
-  const { status: wsStatus, sendJson, sendBinary } = useWebSocket(
-    mode === 'voice' ? '/ws/voice' : '/ws/chat',
+  const { status: connectionStatus, sendJson, sendBinary } = useWebRTC(
+    '/api/webrtc/offer',
     transportHandlers,
     true
   );
@@ -245,7 +244,7 @@ export function useVoicePipeline() {
     messages,
     threadId,
     mode,
-    connectionStatus: wsStatus,
+    connectionStatus,
     isPlaying,
     isUserSpeaking,
     toggleVoice,

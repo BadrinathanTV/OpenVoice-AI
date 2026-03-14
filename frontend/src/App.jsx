@@ -25,7 +25,7 @@ function App() {
   const userOrbState = isUserSpeaking ? 'speaking' : 'idle';
   const agentOrbState = pipelineStatus === 'speaking' ? 'speaking' : 'idle';
   const activeAgentInfo = AGENTS[activeAgent] || AGENTS.CustomerCare;
-  const inactiveAgents = ['OrderOps', 'Shopper']
+  const inactiveAgents = Object.keys(AGENTS)
     .map((key) => AGENTS[key])
     .filter((agent) => agent.name !== activeAgent);
 
