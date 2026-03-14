@@ -1,14 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
-/**
- * Custom hook for browser audio capture and playback via the Web Audio API.
- * Follows SRP: only handles audio I/O, no WebSocket or business logic.
- *
- * Captures raw 16-bit PCM at 16kHz mono for compatibility with the backend.
- */
 export function useAudio() {
   const [isCapturing, setIsCapturing] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isUserSpeaking, setIsUserSpeaking] = useState(false);
 
   const audioContextRef = useRef(null);
   const mediaStreamRef = useRef(null);
@@ -17,8 +12,8 @@ export function useAudio() {
   const isPlayingRef = useRef(false);
   const currentSourceRef = useRef(null);
   const processPlaybackQueueRef = useRef(null);
+  const speechReleaseTimeoutRef = useRef(null);
 
-  /** Get or create the AudioContext (lazy init to avoid autoplay policy issues). */
   const getAudioContext = useCallback(() => {
     if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
@@ -31,10 +26,6 @@ export function useAudio() {
     return audioContextRef.current;
   }, []);
 
-  /**
-   * Start capturing mic audio.
-   * @param {function} onChunk - Called with Int16Array PCM chunks (~32ms each)
-   */
   const startCapture = useCallback(async (onChunk) => {
     try {
       const ctx = getAudioContext();
@@ -49,25 +40,43 @@ export function useAudio() {
       });
       mediaStreamRef.current = stream;
 
-      // Use ScriptProcessorNode as a simpler fallback (AudioWorklet requires HTTPS)
       const source = ctx.createMediaStreamSource(stream);
       const processor = ctx.createScriptProcessor(512, 1, 1);
       const sink = ctx.createGain();
       sink.gain.value = 0;
 
-      processor.onaudioprocess = (e) => {
-        const float32 = e.inputBuffer.getChannelData(0);
-        // Convert float32 → int16 PCM
+      processor.onaudioprocess = (event) => {
+        const float32 = event.inputBuffer.getChannelData(0);
         const int16 = new Int16Array(float32.length);
-        for (let i = 0; i < float32.length; i++) {
-          const s = Math.max(-1, Math.min(1, float32[i]));
-          int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        let sumSquares = 0;
+
+        for (let i = 0; i < float32.length; i += 1) {
+          const sample = Math.max(-1, Math.min(1, float32[i]));
+          sumSquares += sample * sample;
+          int16[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
         }
+
+        const rms = Math.sqrt(sumSquares / float32.length);
+        const speechThreshold = 0.028;
+
+        if (rms > speechThreshold) {
+          if (speechReleaseTimeoutRef.current) {
+            clearTimeout(speechReleaseTimeoutRef.current);
+            speechReleaseTimeoutRef.current = null;
+          }
+          setIsUserSpeaking(true);
+        } else if (!speechReleaseTimeoutRef.current) {
+          speechReleaseTimeoutRef.current = setTimeout(() => {
+            setIsUserSpeaking(false);
+            speechReleaseTimeoutRef.current = null;
+          }, 140);
+        }
+
         onChunk(int16.buffer);
       };
 
       source.connect(processor);
-      processor.connect(sink); // ScriptProcessor must stay connected to process audio.
+      processor.connect(sink);
       sink.connect(ctx.destination);
       workletNodeRef.current = { source, processor, sink };
       setIsCapturing(true);
@@ -77,7 +86,6 @@ export function useAudio() {
     }
   }, [getAudioContext]);
 
-  /** Stop mic capture. */
   const stopCapture = useCallback(() => {
     if (workletNodeRef.current) {
       const { source, processor, sink } = workletNodeRef.current;
@@ -87,9 +95,14 @@ export function useAudio() {
       workletNodeRef.current = null;
     }
     if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
     }
+    if (speechReleaseTimeoutRef.current) {
+      clearTimeout(speechReleaseTimeoutRef.current);
+      speechReleaseTimeoutRef.current = null;
+    }
+    setIsUserSpeaking(false);
     setIsCapturing(false);
   }, []);
 
@@ -101,14 +114,12 @@ export function useAudio() {
 
     const { float32, sampleRate } = playbackQueueRef.current.shift();
     const ctx = getAudioContext();
-
     const buffer = ctx.createBuffer(1, float32.length, sampleRate);
     buffer.getChannelData(0).set(float32);
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.connect(ctx.destination);
-
     currentSourceRef.current = source;
 
     source.onended = () => {
@@ -130,19 +141,16 @@ export function useAudio() {
     processPlaybackQueueRef.current = processPlaybackQueue;
   }, [processPlaybackQueue]);
 
-  /**
-   * Enqueue base64-encoded 16-bit PCM audio for playback.
-   * Plays sequentially (FIFO) to avoid overlapping sentences.
-   */
   const playAudioChunk = useCallback((base64Data, sampleRate = 16000) => {
     const binaryStr = atob(base64Data);
     const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) {
+    for (let i = 0; i < binaryStr.length; i += 1) {
       bytes[i] = binaryStr.charCodeAt(i);
     }
+
     const int16 = new Int16Array(bytes.buffer);
     const float32 = new Float32Array(int16.length);
-    for (let i = 0; i < int16.length; i++) {
+    for (let i = 0; i < int16.length; i += 1) {
       float32[i] = int16[i] / 32768.0;
     }
 
@@ -150,7 +158,6 @@ export function useAudio() {
     processPlaybackQueue();
   }, [processPlaybackQueue]);
 
-  /** Clear the playback queue (e.g. on interrupt). */
   const clearPlaybackQueue = useCallback(() => {
     playbackQueueRef.current = [];
     if (currentSourceRef.current) {
@@ -166,7 +173,6 @@ export function useAudio() {
     setIsPlaying(false);
   }, []);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopCapture();
@@ -180,6 +186,7 @@ export function useAudio() {
   return {
     isCapturing,
     isPlaying,
+    isUserSpeaking,
     startCapture,
     stopCapture,
     playAudioChunk,

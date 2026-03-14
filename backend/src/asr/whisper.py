@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from qwen_asr import Qwen3ASRModel
 
+from pathlib import Path
 from src.core.interfaces import ASRStreamHandle, IASR
 
 # Suppress verbose generation warnings from Qwen
@@ -59,104 +60,79 @@ class ASRModel(IASR):
 
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         device_name = "GPU" if device.startswith("cuda") else "CPU"
-        print(
-            f"[ASR] Loading Qwen3-ASR-0.6B on {device_name} "
-            f"(backend={self.backend})..."
-        )
-
-        if self.backend == "vllm":
-            self.model = self._load_vllm_backend()
-        else:
-            self.model = self._load_transformers_backend(device)
-
-        print(
-            f"[ASR] Model loaded on {device_name} "
-            f"(backend={self.backend}, streaming={self.supports_streaming})"
-        )
-
-    def _load_transformers_backend(self, device: str) -> Qwen3ASRModel:
-        return Qwen3ASRModel.from_pretrained(
-            self.model_path,
-            dtype=torch.float16 if device.startswith("cuda") else torch.float32,
-            device_map=device,
-            max_new_tokens=256,
-        )
-
-    def _load_vllm_backend(self) -> Qwen3ASRModel:
-        llm_kwargs: dict[str, Any] = {}
-        tensor_parallel_size = os.getenv("ASR_TENSOR_PARALLEL_SIZE")
-        gpu_memory_utilization = os.getenv("ASR_GPU_MEMORY_UTILIZATION")
-        max_model_len = os.getenv("ASR_VLLM_MAX_MODEL_LEN")
-
-        if tensor_parallel_size:
-            llm_kwargs["tensor_parallel_size"] = int(tensor_parallel_size)
-        if gpu_memory_utilization:
-            llm_kwargs["gpu_memory_utilization"] = float(gpu_memory_utilization)
-
-        requested_max_model_len = (
-            int(max_model_len) if max_model_len else DEFAULT_VLLM_MAX_MODEL_LEN
-        )
-        llm_kwargs["max_model_len"] = requested_max_model_len
+        configured_model_path = os.getenv("ASR_MODEL_PATH", "Qwen/Qwen3-ASR-0.6B")
+        model_path = self._normalize_model_path(configured_model_path)
+        print(f"[ASR] Loading {model_path} on {device_name}...")
 
         try:
-            return Qwen3ASRModel.LLM(
-                model=self.model_path,
+            self.model = Qwen3ASRModel.from_pretrained(
+                model_path,
+                dtype=torch.float16 if device.startswith("cuda") else torch.float32,
+                device_map=device,
                 max_new_tokens=256,
-                **llm_kwargs,
             )
-        except Exception as exc:
-            message = str(exc)
-            estimated_max_model_len = _parse_estimated_max_model_len(message)
-            retry_max_model_len = (
-                estimated_max_model_len
-                if estimated_max_model_len is not None
-                and estimated_max_model_len < requested_max_model_len
-                else None
-            )
+        except OSError as exc:
+            raise RuntimeError(
+                "Failed to load the ASR model. "
+                f"Resolved ASR model path: '{model_path}'. "
+                "If you are downloading from Hugging Face, use a valid repo id such as "
+                "'Qwen/Qwen3-ASR-0.6B' or set ASR_MODEL_PATH to a local model directory. "
+                "If the repo is gated/private in your environment, authenticate with "
+                "'hf auth login' first."
+            ) from exc
 
-            if retry_max_model_len is not None and _is_kv_cache_capacity_error(message):
-                print(
-                    "[ASR] vLLM max_model_len="
-                    f"{requested_max_model_len} exceeds this GPU's KV-cache budget. "
-                    f"Retrying with max_model_len={retry_max_model_len}."
-                )
-                llm_kwargs["max_model_len"] = retry_max_model_len
-                requested_max_model_len = retry_max_model_len
-                try:
-                    return Qwen3ASRModel.LLM(
-                        model=self.model_path,
-                        max_new_tokens=256,
-                        **llm_kwargs,
-                    )
-                except Exception as retry_exc:
-                    exc = retry_exc
-                    message = str(retry_exc)
-                    estimated_max_model_len = _parse_estimated_max_model_len(message)
+        print(f"[ASR] Model loaded on {device_name}")
 
-            fallback_allowed = _is_truthy(
-                os.getenv("ASR_ALLOW_BACKEND_FALLBACK", "true")
-            )
-            if not fallback_allowed:
-                if _is_kv_cache_capacity_error(message):
-                    raise RuntimeError(
-                        _build_vllm_memory_error_message(
-                            requested_max_model_len,
-                            estimated_max_model_len,
-                        )
-                    ) from exc
-                raise
+    @staticmethod
+    def _normalize_model_path(model_path: str) -> str:
+        if not model_path:
+            return "Qwen/Qwen3-ASR-0.6B"
+        if os.path.isdir(model_path):
+            return model_path
+        if "/" not in model_path and model_path.startswith("Qwen3-ASR-"):
+            model_path = f"Qwen/{model_path}"
 
-            print(
-                f"[ASR] Failed to initialize vLLM backend ({exc}). "
-                "Falling back to transformers backend."
-            )
-            self.backend = "transformers"
-            device = "cuda:0" if torch.cuda.is_available() else "cpu"
-            return self._load_transformers_backend(device)
+        cached_snapshot = ASRModel._resolve_cached_snapshot(model_path)
+        if cached_snapshot:
+            print(f"[ASR] Using cached local model at {cached_snapshot}")
+            return cached_snapshot
 
-    @property
-    def supports_streaming(self) -> bool:
-        return self.backend == "vllm"
+        return model_path
+
+    @staticmethod
+    def _resolve_cached_snapshot(model_path: str) -> str | None:
+        if "/" not in model_path:
+            return None
+
+        owner, repo = model_path.split("/", 1)
+        cache_roots = []
+
+        hf_home = os.getenv("HF_HOME")
+        if hf_home:
+            cache_roots.append(Path(hf_home) / "hub")
+
+        xdg_cache = os.getenv("XDG_CACHE_HOME")
+        if xdg_cache:
+            cache_roots.append(Path(xdg_cache) / "huggingface" / "hub")
+
+        cache_roots.extend([
+            Path.home() / ".cache" / "huggingface" / "hub",
+            Path.home() / ".huggingface" / "hub",
+        ])
+
+        model_cache_dirname = f"models--{owner}--{repo}"
+        for cache_root in cache_roots:
+            snapshot_root = cache_root / model_cache_dirname / "snapshots"
+            if not snapshot_root.is_dir():
+                continue
+
+            for snapshot_dir in sorted(snapshot_root.iterdir(), reverse=True):
+                if not snapshot_dir.is_dir():
+                    continue
+                if (snapshot_dir / "config.json").is_file():
+                    return str(snapshot_dir)
+
+        return None
 
 
     def transcribe(self, audio_data: np.ndarray, sample_rate: int = 16000) -> str:
@@ -216,3 +192,4 @@ class ASRModel(IASR):
         stream.language = str(getattr(backend_state, "language", "") or "")
         stream.text = str(getattr(backend_state, "text", "") or "").strip()
         return stream.text
+

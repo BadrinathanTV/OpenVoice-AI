@@ -4,23 +4,25 @@ import { useWebRTC } from './useWebRTC';
 import { useAudio } from './useAudio';
 import { DEFAULT_AGENT } from '../config/agents';
 
-/**
- * Orchestration hook — coordinates realtime transport, audio, and UI state.
- * Follows the Interface Segregation Principle: exposes a clean API to components
- * without leaking implementation details of the transport or audio internals.
- */
 export function useVoicePipeline() {
   const [activeAgent, setActiveAgent] = useState(DEFAULT_AGENT);
-  const [pipelineStatus, setPipelineStatus] = useState('idle'); // idle, recording, processing, thinking, speaking
+  const [pipelineStatus, setPipelineStatus] = useState('idle');
   const [messages, setMessages] = useState([]);
   const [threadId, setThreadId] = useState(null);
-  const [mode, setMode] = useState('voice'); // 'voice' | 'text'
+  const [mode, setMode] = useState('voice');
 
   const currentAiMessageRef = useRef('');
   const currentUserMessageRef = useRef('');
   const isAudioPlayingRef = useRef(false);
 
-  const { isPlaying, startCapture, stopCapture, playAudioChunk, clearPlaybackQueue } = useAudio();
+  const {
+    isPlaying,
+    isUserSpeaking,
+    startCapture,
+    stopCapture,
+    playAudioChunk,
+    clearPlaybackQueue,
+  } = useAudio();
 
   useEffect(() => {
     isAudioPlayingRef.current = isPlaying;
@@ -61,7 +63,6 @@ export function useVoicePipeline() {
         break;
 
       case 'status':
-        // Barge-in: if user starts speaking while AI audio is playing, interrupt it
         if (msg.value === 'recording' && isAudioPlayingRef.current) {
           clearPlaybackQueue();
         }
@@ -69,7 +70,6 @@ export function useVoicePipeline() {
           commitPendingAiMessage();
         }
         if (msg.value === 'idle' && isAudioPlayingRef.current) {
-          // Don't override 'speaking' status while audio is still playing
           break;
         }
         setPipelineStatus(msg.value);
@@ -120,14 +120,11 @@ export function useVoicePipeline() {
           }
         } else if (msg.role === 'ai') {
           if (msg.partial) {
-            // Accumulate partial AI responses without adding custom spaces,
-            // as raw tokens directly from the LLM usually include appropriate spacing.
             currentAiMessageRef.current += msg.text;
             setMessages((prev) => {
               const copy = [...prev];
               const last = copy[copy.length - 1];
               if (last && last.role === 'ai' && last.partial) {
-                // Update the in-progress AI message
                 copy[copy.length - 1] = {
                   ...last,
                   text: currentAiMessageRef.current.trim(),
@@ -144,7 +141,6 @@ export function useVoicePipeline() {
               return copy;
             });
           } else {
-            // Final complete message
             setMessages((prev) => {
               const copy = [...prev];
               const last = copy[copy.length - 1];
@@ -200,33 +196,17 @@ export function useVoicePipeline() {
     onClose: () => console.log('[Pipeline] Realtime transport disconnected'),
   };
 
-  const webrtcVoice = useWebRTC(
-    '/api/webrtc/offer',
-    transportHandlers,
-    mode === 'voice'
-  );
-  const websocketChat = useWebSocket(
-    '/ws/chat',
-    transportHandlers,
-    mode === 'text'
+  const { status: wsStatus, sendJson, sendBinary } = useWebSocket(
+    mode === 'voice' ? '/ws/voice' : '/ws/chat',
+    wsHandlers,
+    true
   );
 
-  const connectionStatus = mode === 'voice'
-    ? webrtcVoice.status
-    : websocketChat.status;
-  const sendJson = mode === 'voice'
-    ? webrtcVoice.sendJson
-    : websocketChat.sendJson;
-  const sendBinary = mode === 'voice'
-    ? webrtcVoice.sendBinary
-    : websocketChat.sendBinary;
-
-  /** Toggle voice capture on/off. */
   const toggleVoice = useCallback(async () => {
     if (pipelineStatus === 'recording' || pipelineStatus === 'accumulating') {
       stopCapture();
       setPipelineStatus('processing');
-      sendJson({ type: "stop_audio" });
+      sendJson({ type: 'stop_audio' });
     } else {
       clearPlaybackQueue();
       setPipelineStatus('recording');
@@ -240,14 +220,12 @@ export function useVoicePipeline() {
     }
   }, [pipelineStatus, startCapture, stopCapture, sendJson, sendBinary, clearPlaybackQueue]);
 
-  /** Send a text message (text chat mode). */
   const sendTextMessage = useCallback((text) => {
     if (!text.trim()) return;
     sendJson({ type: 'text', text: text.trim() });
     currentAiMessageRef.current = '';
   }, [sendJson]);
 
-  /** Switch between voice and text mode. */
   const switchMode = useCallback((newMode) => {
     stopCapture();
     clearPlaybackQueue();
@@ -262,7 +240,6 @@ export function useVoicePipeline() {
   const effectivePipelineStatus = isPlaying ? 'speaking' : pipelineStatus;
 
   return {
-    // State
     activeAgent,
     pipelineStatus: effectivePipelineStatus,
     messages,
@@ -270,8 +247,7 @@ export function useVoicePipeline() {
     mode,
     connectionStatus,
     isPlaying,
-
-    // Actions
+    isUserSpeaking,
     toggleVoice,
     sendTextMessage,
     switchMode,
