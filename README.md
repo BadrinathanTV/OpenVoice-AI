@@ -116,8 +116,6 @@ OpenVoice AI/
 │   │   └── vad/                    # 🎯 Voice Activity Detection
 │   │       └── silero.py           # Silero VAD (PyTorch, GPU)
 │   ├── models/                     # 📦 Downloaded TTS voice models
-│   ├── pyproject.toml              # Python dependencies (uv)
-│   ├── uv.lock                     # Locked dependency versions
 │   └── .env                        # API keys (not committed)
 │
 ├── frontend/
@@ -142,7 +140,10 @@ OpenVoice AI/
 │   ├── index.html
 │   ├── vite.config.js
 │   └── package.json
-│
+
+├── pyproject.toml                  # Python dependencies (uv)
+├── uv.lock                         # Locked dependency versions
+
 └── .gitignore
 ```
 
@@ -184,12 +185,17 @@ nano .env
 OPENAI_API_KEY=sk-your-openai-key
 GROQ_API_KEY=gsk_your-groq-key
 ASR_MODEL_PATH=/path/to/Qwen3-ASR-0.6B
+DATABASE_URL=mongodb://localhost:27017/
 ```
 
 **Install dependencies and start:**
 ```bash
-# uv will create the .venv and install everything
-uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000
+# Run this once from the repository root
+uv sync
+
+# Then start the backend from backend/
+cd backend
+uv run --project .. uvicorn src.api.server:app --host 0.0.0.0 --port 8000
 ```
 
 The first run will:

@@ -4,11 +4,12 @@ Receives audio chunks from WebSocket, processes through VAD → ASR → LLM → 
 and sends results back over WebSocket.
 """
 
-import time
 import asyncio
-import numpy as np
-import struct
+import contextlib
+import time
 from typing import Dict, Optional
+
+import numpy as np
 
 from src.utils.chunker import SentenceChunker
 from src.core.interfaces import IVAD, IASR, ITTS
@@ -29,6 +30,8 @@ class WebVoicePipeline:
         self.asr = asr
         self.tts_models = tts_models
         self.sample_rate = sample_rate
+        self.min_speech_samples = int(sample_rate * 0.6)
+        self.manual_stop_min_samples = int(sample_rate * 0.2)
         self.session: Optional[VoiceSession] = None
         self._response_lock = asyncio.Lock()
         self._cancel_response = False
@@ -107,17 +110,12 @@ class WebVoicePipeline:
             self.silence_chunks += 1
             # ~1600ms of silence (32ms * 50 chunks)
             if self.silence_chunks > 50:
-                audio_array = np.concatenate(self.speech_buffer)
-                if len(audio_array.shape) > 1:
-                    audio_array = audio_array[:, 0]
-                
-                # LAYER 1 FILTER: Audio Duration Check
-                # If total audio is less than ~0.6s (16000 * 0.6 = 9600 samples)
-                if len(audio_array) < 9600:
-                    self._reset_state()
+                audio_array = self._consume_speech_buffer(
+                    min_samples=self.min_speech_samples
+                )
+                if audio_array is None:
                     return {"status": "listening"}
 
-                self._reset_state()
                 return {"status": "speech_end", "audio": audio_array}
             return {"status": "accumulating"}
         else:
@@ -125,8 +123,38 @@ class WebVoicePipeline:
             # If we had a few active chunks but they didn't reach the threshold, discard them.
             if len(self.speech_buffer) > 0 and not self.is_speaking:
                 self._reset_state()
-                
+
             return {"status": "listening"}
+
+    def _consume_speech_buffer(self, min_samples: int) -> Optional[np.ndarray]:
+        """Extract and clear the current speech buffer if it is large enough."""
+        if not self.speech_buffer:
+            self._reset_state()
+            return None
+
+        audio_array = np.concatenate(self.speech_buffer)
+        if len(audio_array.shape) > 1:
+            audio_array = audio_array[:, 0]
+
+        self._reset_state()
+
+        if len(audio_array) < min_samples:
+            return None
+
+        return audio_array
+
+    def finalize_current_utterance(self) -> dict:
+        """
+        Force-complete the current utterance, typically when the user taps stop.
+        Uses a shorter minimum duration than silence-based finalization because the
+        explicit user action indicates they are done speaking.
+        """
+        audio_array = self._consume_speech_buffer(
+            min_samples=self.manual_stop_min_samples
+        )
+        if audio_array is None:
+            return {"status": "listening"}
+        return {"status": "speech_end", "audio": audio_array}
 
     def transcribe(self, audio_array: np.ndarray) -> str:
         """Run ASR on a complete speech segment."""
@@ -135,6 +163,10 @@ class WebVoicePipeline:
         latency = time.time() - start
         print(f"[WebPipeline ASR] '{text}' ({latency:.2f}s)")
         return text
+
+    def cancel_active_response(self):
+        """Signal any in-flight response generation to stop as soon as possible."""
+        self._cancel_response = True
 
     async def generate_response(self, text: str, send_callback):
         """
@@ -148,9 +180,6 @@ class WebVoicePipeline:
         """
         if not self.session:
             self.init_session()
-
-        # Send user transcript
-        await send_callback({"type": "transcript", "role": "user", "text": text})
 
         if len(text.strip()) < 2:
             return
@@ -170,12 +199,9 @@ class WebVoicePipeline:
                 await send_callback({"type": "status", "value": "idle"})
                 return
 
-        await send_callback({"type": "status", "value": "thinking"})
-
-        # Cancel any in-flight response before starting a new one
-        self._cancel_response = True
         async with self._response_lock:
             self._cancel_response = False
+            await send_callback({"type": "status", "value": "thinking"})
             await self._do_generate(text, send_callback)
 
     async def _do_generate(self, text: str, send_callback):
@@ -193,13 +219,17 @@ class WebVoicePipeline:
                 if item is None:  # Sentinel value to exit worker
                     tts_queue.task_done()
                     break
-                    
+
                 sentence, active_agent = item
-                
+
+                if self._cancel_response:
+                    tts_queue.task_done()
+                    continue
+
                 tts = self.tts_models.get(
                     active_agent, list(self.tts_models.values())[0]
                 )
-                
+
                 tts_start = time.time()
                 # Run synchronous TTS via executor to avoid blocking the event loop
                 audio_data, fs = await asyncio.get_event_loop().run_in_executor(
@@ -209,7 +239,7 @@ class WebVoicePipeline:
                 print(f"  [TTS] '{sentence[:40]}...' ({tts_latency:.2f}s)")
 
                 # Convert float32 audio to 16-bit PCM bytes for the browser
-                if len(audio_data) > 0:
+                if not self._cancel_response and len(audio_data) > 0:
                     pcm_data = (audio_data * 32767).astype(np.int16).tobytes()
                     await send_callback({
                         "type": "audio",
@@ -248,18 +278,20 @@ class WebVoicePipeline:
                     # Put it in the queue for the worker to synthesize
                     await tts_queue.put((sentence, active_agent))
 
-            # Flush remaining text from chunker into the TTS queue
-            for sentence in chunker.flush():
-                active_agent = self.session.active_agent_name
-                await tts_queue.put((sentence, active_agent))
+            if not self._cancel_response:
+                # Flush remaining text from chunker into the TTS queue
+                for sentence in chunker.flush():
+                    active_agent = self.session.active_agent_name
+                    await tts_queue.put((sentence, active_agent))
 
-            # Send Sentinel to stop the TTS worker
+            # Send sentinel to stop the TTS worker.
             await tts_queue.put(None)
-            
-            # Wait for all TTS generation and callbacks to complete
             await tts_queue.join()
             await worker_task
-            
+
+            if self._cancel_response:
+                return
+
             # Final complete transcript
             await send_callback({
                 "type": "transcript",
@@ -268,11 +300,16 @@ class WebVoicePipeline:
                 "agent": self.session.active_agent_name,
                 "partial": False,
             })
-
             await send_callback({"type": "status", "value": "idle"})
-            
+        except asyncio.CancelledError:
+            self._cancel_response = True
+            raise
         except Exception as e:
             print(f"[WebPipeline] Error during response generation: {e}")
-            await tts_queue.put(None)
-            await worker_task
             await send_callback({"type": "status", "value": "idle"})
+        finally:
+            self._cancel_response = True
+            if not worker_task.done():
+                worker_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await worker_task

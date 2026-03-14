@@ -16,6 +16,7 @@ export function useAudio() {
   const playbackQueueRef = useRef([]);
   const isPlayingRef = useRef(false);
   const currentSourceRef = useRef(null);
+  const processPlaybackQueueRef = useRef(null);
 
   /** Get or create the AudioContext (lazy init to avoid autoplay policy issues). */
   const getAudioContext = useCallback(() => {
@@ -51,6 +52,8 @@ export function useAudio() {
       // Use ScriptProcessorNode as a simpler fallback (AudioWorklet requires HTTPS)
       const source = ctx.createMediaStreamSource(stream);
       const processor = ctx.createScriptProcessor(512, 1, 1);
+      const sink = ctx.createGain();
+      sink.gain.value = 0;
 
       processor.onaudioprocess = (e) => {
         const float32 = e.inputBuffer.getChannelData(0);
@@ -64,8 +67,9 @@ export function useAudio() {
       };
 
       source.connect(processor);
-      processor.connect(ctx.destination); // Required for onaudioprocess to fire
-      workletNodeRef.current = { source, processor };
+      processor.connect(sink); // ScriptProcessor must stay connected to process audio.
+      sink.connect(ctx.destination);
+      workletNodeRef.current = { source, processor, sink };
       setIsCapturing(true);
     } catch (err) {
       console.error('[Audio] Mic capture failed:', err);
@@ -76,9 +80,10 @@ export function useAudio() {
   /** Stop mic capture. */
   const stopCapture = useCallback(() => {
     if (workletNodeRef.current) {
-      const { source, processor } = workletNodeRef.current;
+      const { source, processor, sink } = workletNodeRef.current;
       processor.disconnect();
       source.disconnect();
+      sink.disconnect();
       workletNodeRef.current = null;
     }
     if (mediaStreamRef.current) {
@@ -87,6 +92,43 @@ export function useAudio() {
     }
     setIsCapturing(false);
   }, []);
+
+  const processPlaybackQueue = useCallback(() => {
+    if (isPlayingRef.current || playbackQueueRef.current.length === 0) return;
+
+    isPlayingRef.current = true;
+    setIsPlaying(true);
+
+    const { float32, sampleRate } = playbackQueueRef.current.shift();
+    const ctx = getAudioContext();
+
+    const buffer = ctx.createBuffer(1, float32.length, sampleRate);
+    buffer.getChannelData(0).set(float32);
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+
+    currentSourceRef.current = source;
+
+    source.onended = () => {
+      if (currentSourceRef.current === source) {
+        currentSourceRef.current = null;
+      }
+      isPlayingRef.current = false;
+      if (playbackQueueRef.current.length > 0) {
+        processPlaybackQueueRef.current?.();
+      } else {
+        setIsPlaying(false);
+      }
+    };
+
+    source.start();
+  }, [getAudioContext]);
+
+  useEffect(() => {
+    processPlaybackQueueRef.current = processPlaybackQueue;
+  }, [processPlaybackQueue]);
 
   /**
    * Enqueue base64-encoded 16-bit PCM audio for playback.
@@ -106,56 +148,19 @@ export function useAudio() {
 
     playbackQueueRef.current.push({ float32, sampleRate });
     processPlaybackQueue();
-  }, []);
-
-  const processPlaybackQueue = useCallback(() => {
-    if (isPlayingRef.current || playbackQueueRef.current.length === 0) return;
-
-    isPlayingRef.current = true;
-    setIsPlaying(true);
-
-    const { float32, sampleRate } = playbackQueueRef.current.shift();
-    const ctx = getAudioContext();
-
-    // Create a playback context at the correct sample rate if necessary
-    const playCtx = new (window.AudioContext || window.webkitAudioContext)({
-      sampleRate,
-    });
-
-    const buffer = playCtx.createBuffer(1, float32.length, sampleRate);
-    buffer.getChannelData(0).set(float32);
-
-    const source = playCtx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(playCtx.destination);
-    
-    currentSourceRef.current = source;
-
-    source.onended = () => {
-      if (currentSourceRef.current === source) {
-          currentSourceRef.current = null;
-      }
-      playCtx.close();
-      isPlayingRef.current = false;
-      if (playbackQueueRef.current.length > 0) {
-        processPlaybackQueue();
-      } else {
-        setIsPlaying(false);
-      }
-    };
-
-    source.start();
-  }, [getAudioContext]);
+  }, [processPlaybackQueue]);
 
   /** Clear the playback queue (e.g. on interrupt). */
   const clearPlaybackQueue = useCallback(() => {
     playbackQueueRef.current = [];
     if (currentSourceRef.current) {
-        try {
-            currentSourceRef.current.onended = null;
-            currentSourceRef.current.stop();
-        } catch(e) { /* ignore already stopped */ }
-        currentSourceRef.current = null;
+      try {
+        currentSourceRef.current.onended = null;
+        currentSourceRef.current.stop();
+      } catch {
+        // Ignore already-stopped playback.
+      }
+      currentSourceRef.current = null;
     }
     isPlayingRef.current = false;
     setIsPlaying(false);

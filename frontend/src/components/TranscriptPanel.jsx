@@ -6,9 +6,8 @@ import { AGENTS } from '../config/agents';
  * Follows SRP: only renders messages, no state management.
  *
  * @param {Array} messages - Array of { role: 'user'|'ai', text: string, agent?: string }
- * @param {string} activeAgent - Current active agent key
  */
-export function TranscriptPanel({ messages, activeAgent }) {
+export function TranscriptPanel({ messages }) {
   const scrollRef = useRef(null);
 
   // Auto-scroll to bottom when new messages arrive

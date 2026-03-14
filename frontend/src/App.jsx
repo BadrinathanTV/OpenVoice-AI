@@ -65,7 +65,7 @@ function App() {
       </main>
 
       {/* ─── Transcript Panel (Right) ─── */}
-      <TranscriptPanel messages={messages} activeAgent={activeAgent} />
+      <TranscriptPanel messages={messages} />
     </div>
   );
 }

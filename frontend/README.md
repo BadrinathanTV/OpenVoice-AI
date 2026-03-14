@@ -1,16 +1,49 @@
-# React + Vite
+# Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React 19 + Vite frontend for the OpenVoice AI browser client.
 
-Currently, two official plugins are available:
+## What It Does
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Opens a WebSocket connection to the backend voice or chat endpoint
+- Streams microphone PCM audio in voice mode
+- Renders live partial/final transcripts
+- Plays streamed TTS audio from the backend
+- Shows the active agent and pipeline state
 
-## React Compiler
+## Commands
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+npm install
+npm run dev
+```
 
-## Expanding the ESLint configuration
+For a production-style preview:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+npm run build
+npm run preview -- --host 0.0.0.0 --port 5173
+```
+
+## Backend Connection
+
+By default the frontend talks to port `8000` on the current host.
+
+Optional environment variables:
+
+```bash
+VITE_API_BASE_URL=http://localhost:8000
+VITE_WS_BASE_URL=ws://localhost:8000
+```
+
+If unset, the app derives `http/ws` vs `https/wss` from the current page.
+
+## Browser Notes
+
+- Microphone access is required for voice mode
+- WebSocket audio streaming assumes 16 kHz mono PCM chunks
+- The UI expects backend messages for:
+  - `session`
+  - `status`
+  - `agent`
+  - `transcript`
+  - `audio`

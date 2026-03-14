@@ -4,10 +4,9 @@ Provides both voice (binary audio) and text chat modes.
 """
 
 import asyncio
-import json
 import base64
-import os
-import sys
+import json
+from contextlib import suppress
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -96,7 +95,6 @@ async def websocket_voice(ws: WebSocket):
 
     # Each WebSocket connection gets its own LangGraph session
     from src.api.web_pipeline import WebVoicePipeline
-    import copy
 
     try:
         conn_pipeline = WebVoicePipeline(
@@ -105,6 +103,7 @@ async def websocket_voice(ws: WebSocket):
             tts_models=pipeline.tts_models,
         )
         thread_id = conn_pipeline.init_session()
+        response_task = None
 
         await ws.send_json({
             "type": "session",
@@ -125,6 +124,25 @@ async def websocket_voice(ws: WebSocket):
             else:
                 await ws.send_json(msg)
 
+        async def cancel_response():
+            nonlocal response_task
+            if response_task is None:
+                return
+
+            if not response_task.done():
+                conn_pipeline.cancel_active_response()
+                response_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await response_task
+            response_task = None
+
+        async def start_response(user_text: str):
+            nonlocal response_task
+            await cancel_response()
+            response_task = asyncio.create_task(
+                conn_pipeline.generate_response(user_text, send_callback)
+            )
+
         while True:
             data = await ws.receive()
 
@@ -137,6 +155,7 @@ async def websocket_voice(ws: WebSocket):
                 result = conn_pipeline.process_audio_chunk(raw_bytes)
 
                 if result["status"] == "speech_detected":
+                    await cancel_response()
                     await ws.send_json({"type": "status", "value": "recording"})
 
                 elif result["status"] == "speech_partial":
@@ -166,7 +185,7 @@ async def websocket_voice(ws: WebSocket):
                             "partial": False
                         })
                         # Generate the AI response using the final text
-                        await conn_pipeline.generate_response(text, send_callback)
+                        await start_response(text)
                     else:
                         await ws.send_json({"type": "status", "value": "idle"})
 
@@ -176,7 +195,33 @@ async def websocket_voice(ws: WebSocket):
                 if msg.get("type") == "text":
                     user_text = msg.get("text", "").strip()
                     if user_text:
-                        await conn_pipeline.generate_response(user_text, send_callback)
+                        await ws.send_json({
+                            "type": "transcript",
+                            "role": "user",
+                            "text": user_text,
+                            "partial": False,
+                        })
+                        await start_response(user_text)
+                elif msg.get("type") == "stop_audio":
+                    result = conn_pipeline.finalize_current_utterance()
+                    if result["status"] != "speech_end":
+                        await ws.send_json({"type": "status", "value": "idle"})
+                        continue
+
+                    await ws.send_json({"type": "status", "value": "processing"})
+                    text = await asyncio.get_event_loop().run_in_executor(
+                        None, conn_pipeline.transcribe, result["audio"]
+                    )
+                    if text and len(text.strip()) >= 2:
+                        await ws.send_json({
+                            "type": "transcript",
+                            "role": "user",
+                            "text": text,
+                            "partial": False,
+                        })
+                        await start_response(text)
+                    else:
+                        await ws.send_json({"type": "status", "value": "idle"})
 
     except WebSocketDisconnect:
         print(f"[Server] Client disconnected globally")
@@ -186,6 +231,9 @@ async def websocket_voice(ws: WebSocket):
             await ws.close()
         except:
             pass
+    finally:
+        with suppress(Exception):
+            await cancel_response()
 
 
 # ─── WebSocket: Text Chat Mode ─────────────────────────────────────────────
@@ -227,6 +275,12 @@ async def websocket_chat(ws: WebSocket):
             msg = json.loads(raw)
             user_text = msg.get("text", "").strip()
             if user_text:
+                await ws.send_json({
+                    "type": "transcript",
+                    "role": "user",
+                    "text": user_text,
+                    "partial": False,
+                })
                 await conn_pipeline.generate_response(user_text, send_callback)
     except WebSocketDisconnect:
         print(f"[Server] Chat client disconnected globally")

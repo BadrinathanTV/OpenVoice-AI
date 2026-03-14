@@ -29,5 +29,19 @@ export const AGENTS = {
 
 export const DEFAULT_AGENT = 'CustomerCare';
 
-export const WS_BASE_URL = `ws://${window.location.hostname}:8000`;
-export const API_BASE_URL = `http://${window.location.hostname}:8000`;
+const sanitizeBaseUrl = (value) => value?.replace(/\/+$/, '');
+
+const configuredApiBaseUrl = sanitizeBaseUrl(import.meta.env.VITE_API_BASE_URL);
+const configuredWsBaseUrl = sanitizeBaseUrl(import.meta.env.VITE_WS_BASE_URL);
+const defaultHttpProtocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+const defaultWsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+export const API_BASE_URL =
+  configuredApiBaseUrl ||
+  `${defaultHttpProtocol}//${window.location.hostname}:8000`;
+
+export const WS_BASE_URL =
+  configuredWsBaseUrl ||
+  (configuredApiBaseUrl
+    ? configuredApiBaseUrl.replace(/^http/i, 'ws')
+    : `${defaultWsProtocol}//${window.location.hostname}:8000`);

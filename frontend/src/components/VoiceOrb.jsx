@@ -12,6 +12,7 @@ export function VoiceOrb({ agentName, state = 'idle' }) {
   const canvasRef = useRef(null);
   const particlesRef = useRef([]);
   const animFrameRef = useRef(null);
+  const canvasSizeRef = useRef({ width: 0, height: 0 });
   const agent = AGENTS[agentName] || AGENTS.CustomerCare;
 
   // Update CSS custom properties for the agent color
@@ -25,13 +26,20 @@ export function VoiceOrb({ agentName, state = 'idle' }) {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
     const resize = () => {
-      canvas.width = canvas.offsetWidth * window.devicePixelRatio;
-      canvas.height = canvas.offsetHeight * window.devicePixelRatio;
-      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      const { width, height } = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+
+      canvasSizeRef.current = { width, height };
+      canvas.width = Math.max(1, Math.round(width * dpr));
+      canvas.height = Math.max(1, Math.round(height * dpr));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
     };
     resize();
+    window.addEventListener('resize', resize);
 
     const hexToRgb = (hex) => {
       const r = parseInt(hex.slice(1, 3), 16);
@@ -43,8 +51,9 @@ export function VoiceOrb({ agentName, state = 'idle' }) {
     const spawnParticle = () => {
       const angle = Math.random() * Math.PI * 2;
       const speed = 0.3 + Math.random() * 1.2;
-      const centerX = canvas.offsetWidth / 2;
-      const centerY = canvas.offsetHeight / 2;
+      const { width, height } = canvasSizeRef.current;
+      const centerX = width / 2;
+      const centerY = height / 2;
       return {
         x: centerX + (Math.random() - 0.5) * 40,
         y: centerY + (Math.random() - 0.5) * 40,
@@ -57,7 +66,8 @@ export function VoiceOrb({ agentName, state = 'idle' }) {
     };
 
     const animate = () => {
-      ctx.clearRect(0, 0, canvas.offsetWidth, canvas.offsetHeight);
+      const { width, height } = canvasSizeRef.current;
+      ctx.clearRect(0, 0, width, height);
 
       if (state === 'speaking') {
         // Spawn 2–3 particles per frame
@@ -97,6 +107,7 @@ export function VoiceOrb({ agentName, state = 'idle' }) {
     animate();
 
     return () => {
+      window.removeEventListener('resize', resize);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
   }, [state, agent.color]);

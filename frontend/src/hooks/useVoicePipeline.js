@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useWebSocket } from './useWebSocket';
 import { useAudio } from './useAudio';
 import { DEFAULT_AGENT } from '../config/agents';
@@ -21,18 +21,37 @@ export function useVoicePipeline() {
 
   const { isPlaying, startCapture, stopCapture, playAudioChunk, clearPlaybackQueue } = useAudio();
 
-  // Track playing state to update pipeline status
   useEffect(() => {
     isAudioPlayingRef.current = isPlaying;
-    if (isPlaying) {
-      setPipelineStatus('speaking');
-    }
   }, [isPlaying]);
+
+  const commitPendingAiMessage = useCallback(() => {
+    setMessages((prev) => {
+      const copy = [...prev];
+      const last = copy[copy.length - 1];
+      if (last && last.role === 'ai' && last.partial) {
+        copy[copy.length - 1] = {
+          ...last,
+          partial: false,
+        };
+      }
+      return copy;
+    });
+    currentAiMessageRef.current = '';
+  }, []);
 
   const handleMessage = useCallback((msg) => {
     switch (msg.type) {
       case 'session':
-        setThreadId(msg.threadId);
+        setThreadId((prevThreadId) => {
+          if (prevThreadId && prevThreadId !== msg.threadId) {
+            setMessages([]);
+            currentAiMessageRef.current = '';
+            currentUserMessageRef.current = '';
+            setPipelineStatus('idle');
+          }
+          return msg.threadId;
+        });
         if (msg.agent) setActiveAgent(msg.agent);
         break;
 
@@ -44,6 +63,9 @@ export function useVoicePipeline() {
         // Barge-in: if user starts speaking while AI audio is playing, interrupt it
         if (msg.value === 'recording' && isAudioPlayingRef.current) {
           clearPlaybackQueue();
+        }
+        if (msg.value === 'recording' || msg.value === 'processing') {
+          commitPendingAiMessage();
         }
         if (msg.value === 'idle' && isAudioPlayingRef.current) {
           // Don't override 'speaking' status while audio is still playing
@@ -93,7 +115,7 @@ export function useVoicePipeline() {
               return copy;
             });
             currentUserMessageRef.current = '';
-            currentAiMessageRef.current = '';
+            commitPendingAiMessage();
           }
         } else if (msg.role === 'ai') {
           if (msg.partial) {
@@ -147,7 +169,7 @@ export function useVoicePipeline() {
       default:
         break;
     }
-  }, [playAudioChunk]);
+  }, [clearPlaybackQueue, commitPendingAiMessage, playAudioChunk]);
 
   const wsHandlers = {
     onMessage: handleMessage,
@@ -183,8 +205,6 @@ export function useVoicePipeline() {
   /** Send a text message (text chat mode). */
   const sendTextMessage = useCallback((text) => {
     if (!text.trim()) return;
-    // Add user message to chat immediately
-    setMessages((prev) => [...prev, { role: 'user', text: text.trim() }]);
     sendJson({ type: 'text', text: text.trim() });
     currentAiMessageRef.current = '';
   }, [sendJson]);
@@ -194,13 +214,19 @@ export function useVoicePipeline() {
     stopCapture();
     clearPlaybackQueue();
     setPipelineStatus('idle');
+    setMessages([]);
+    setThreadId(null);
+    currentAiMessageRef.current = '';
+    currentUserMessageRef.current = '';
     setMode(newMode);
   }, [stopCapture, clearPlaybackQueue]);
+
+  const effectivePipelineStatus = isPlaying ? 'speaking' : pipelineStatus;
 
   return {
     // State
     activeAgent,
-    pipelineStatus,
+    pipelineStatus: effectivePipelineStatus,
     messages,
     threadId,
     mode,

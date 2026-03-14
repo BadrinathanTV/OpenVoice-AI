@@ -18,6 +18,7 @@ export function useWebSocket(path, handlers = {}, autoConnect = true) {
   const handlersRef = useRef(handlers);
   const reconnectTimerRef = useRef(null);
   const isMountedRef = useRef(false);
+  const connectRef = useRef(null);
 
   // Keep handlers ref current without re-triggering effects
   useEffect(() => {
@@ -61,7 +62,9 @@ export function useWebSocket(path, handlers = {}, autoConnect = true) {
       // Auto-reconnect only if still mounted
       if (isMountedRef.current && autoConnect) {
         reconnectTimerRef.current = setTimeout(() => {
-          if (isMountedRef.current) connect();
+          if (isMountedRef.current) {
+            connectRef.current?.();
+          }
         }, 3000);
       }
     };
@@ -72,6 +75,10 @@ export function useWebSocket(path, handlers = {}, autoConnect = true) {
 
     wsRef.current = ws;
   }, [path, autoConnect]);
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   const disconnect = useCallback(() => {
     clearTimeout(reconnectTimerRef.current);
@@ -102,6 +109,7 @@ export function useWebSocket(path, handlers = {}, autoConnect = true) {
 
   useEffect(() => {
     isMountedRef.current = true;
+    let initialConnectTimer = null;
 
     // Close any stale connection before connecting fresh
     if (wsRef.current) {
@@ -111,13 +119,20 @@ export function useWebSocket(path, handlers = {}, autoConnect = true) {
     }
     clearTimeout(reconnectTimerRef.current);
 
-    if (autoConnect) connect();
+    if (autoConnect) {
+      initialConnectTimer = setTimeout(() => {
+        if (isMountedRef.current) {
+          connectRef.current?.();
+        }
+      }, 0);
+    }
 
     return () => {
+      clearTimeout(initialConnectTimer);
       isMountedRef.current = false;
       disconnect();
     };
-  }, [path]); // Only reconnect when the path actually changes
+  }, [autoConnect, connect, disconnect, path]); // Only reconnect when the path actually changes
 
   return { status, connect, disconnect, sendJson, sendBinary };
 }
