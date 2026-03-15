@@ -54,8 +54,19 @@ class TTSModel(ITTS):
                 self.voice.config.length_scale = current_scale / speed
 
 
+    def synthesize_streaming(self, text: str):
+        """
+        Yields (audio_float32_array, sample_rate) sub-chunks as Piper generates them.
+        This allows the first audio to be sent to the browser before the full
+        sentence has finished synthesizing.
+        """
+        sample_rate = self.voice.config.sample_rate
+        for audio_chunk in self.voice.synthesize(text):
+            if len(audio_chunk.audio_float_array) > 0:
+                yield audio_chunk.audio_float_array, sample_rate
+
     def synthesize(self, text: str) -> tuple[np.ndarray, int]:
-        # Synthesize text to numpy array directly from Piper's yields
+        """Full-sentence synthesis (concatenates all sub-chunks)."""
         audio_arrays = []
         sample_rate = self.voice.config.sample_rate
         for audio_chunk in self.voice.synthesize(text):

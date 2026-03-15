@@ -10,9 +10,11 @@ from qwen_asr import Qwen3ASRModel
 from pathlib import Path
 from src.core.interfaces import ASRStreamHandle, IASR
 
-# Suppress verbose generation warnings from Qwen
+# Suppress noisy library logs
 os.environ['TRANSFORMERS_VERBOSITY'] = 'error'
+os.environ['ORT_LOGGING_LEVEL'] = '3'  # 3 = ERROR
 warnings.filterwarnings('ignore', category=UserWarning, module='transformers')
+warnings.filterwarnings('ignore', category=UserWarning, module='torch')
 
 DEFAULT_VLLM_MAX_MODEL_LEN = 8192
 

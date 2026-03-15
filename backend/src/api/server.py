@@ -27,7 +27,7 @@ WEBRTC_VERBOSE = os.getenv("OPENVOICE_WEBRTC_VERBOSE", "0").lower() in {
 }
 if not WEBRTC_VERBOSE:
     # Silence noisy per-candidate ICE logs by default.
-    for logger_name in ("aioice", "aioice.ice", "aiortc"):
+    for logger_name in ("aioice", "aioice.ice", "aiortc", "httpx", "openai"):
         logging.getLogger(logger_name).setLevel(logging.WARNING)
 
 if TYPE_CHECKING:
@@ -52,7 +52,7 @@ class WebRTCOffer(BaseModel):
 def _build_pipeline() -> "WebVoicePipeline":
     """Instantiate the heavy ML models (runs once, in-process)."""
     from src.vad.silero import SileroVAD
-    from src.asr.whisper import ASRModel
+    from src.asr.qwen import ASRModel
     from src.tts.piper import TTSModel
     from src.api.web_pipeline import WebVoicePipeline
 
@@ -193,8 +193,9 @@ async def webrtc_offer(offer: WebRTCOffer):
         )
 
     conn_pipeline = await _build_connection_pipeline()
-    thread_id = conn_pipeline.init_session()
     session_id = f"rtc_{uuid.uuid4().hex[:8]}"
+    print(f"[VoiceSession] Initializing swarm for {session_id}...")
+    thread_id = conn_pipeline.init_session()
     peer_connection = RTCPeerConnection()
     _webrtc_peer_connections[session_id] = peer_connection
     print(f"[Transport] WebRTC voice session created: {session_id}")
@@ -321,6 +322,10 @@ async def webrtc_offer(offer: WebRTCOffer):
                     "partial": False,
                 })
                 await start_response(user_text)
+            return
+
+        if msg.get("type") == "toggle_denoising":
+            conn_pipeline.use_denoising = bool(msg.get("enabled", False))
             return
 
         if msg.get("type") != "stop_audio":
@@ -578,7 +583,7 @@ async def websocket_voice(ws: WebSocket):
                     if result["status"] != "speech_end":
                         await ws.send_json({"type": "status", "value": "idle"})
                         continue
-
+                    
                     await ws.send_json({"type": "status", "value": "processing"})
                     if "text" in result:
                         text = str(result["text"]).strip()
@@ -591,11 +596,16 @@ async def websocket_voice(ws: WebSocket):
                             "type": "transcript",
                             "role": "user",
                             "text": text,
-                            "partial": False,
+                            "partial": False
                         })
                         await start_response(text)
                     else:
                         await ws.send_json({"type": "status", "value": "idle"})
+                    continue
+
+                elif msg.get("type") == "toggle_denoising":
+                    conn_pipeline.use_denoising = bool(msg.get("enabled", False))
+                    continue
 
     except WebSocketDisconnect:
         ws_closed = True

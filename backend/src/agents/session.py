@@ -6,10 +6,9 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
+from langgraph.checkpoint.memory import MemorySaver
 import os
 import uuid
-from pymongo import MongoClient
-from langgraph.checkpoint.mongodb import MongoDBSaver
 
 from src.agents.state import VoiceState
 from src.agents.specialized.customer_care import get_customer_care_agent, lookup_policy, transfer_to_order_ops, transfer_to_shopper
@@ -17,9 +16,11 @@ from src.agents.specialized.shopper import get_shopper_agent, search_catalog, tr
 from src.agents.specialized.order_ops import get_order_ops_agent, check_order_status, transfer_to_customer_care as oo_to_cc, transfer_to_shopper as oo_to_shopper
 
 class VoiceSession:
-    def __init__(self, db_url: str | None = None) -> None:
+    def __init__(self) -> None:
         """
         Manages the independent agent sessions using LangGraph.
+        Uses in-memory checkpointing for minimal latency (voice sessions
+        are ephemeral and don't need persistence beyond the connection).
         """
         print("[VoiceSession] Initializing LangGraph Swarm...")
         
@@ -31,11 +32,8 @@ class VoiceSession:
             oo_to_cc, oo_to_shopper
         ]
         
-        # Initialize MongoDB Connection
-        # Fallback to a default localhost DB if not specified in ENV
-        self.db_url = db_url or os.getenv("DATABASE_URL", "mongodb://localhost:27017/")
-        self.mongo_client = MongoClient(self.db_url)
-        self.checkpointer = MongoDBSaver(self.mongo_client)
+        # In-memory checkpointer — zero network latency for ephemeral sessions
+        self.checkpointer = MemorySaver()
         
         # Build the graph with a FRESH thread_id every time the session starts,
         # so we don't replay stale conversation history from previous runs.
@@ -95,14 +93,6 @@ class VoiceSession:
     @property
     def active_agent_name(self) -> str:
         """Returns the cached agent name (fast, no DB call)."""
-        return self._cached_agent
-
-    def _refresh_agent_name(self) -> str:
-        """Reads the actual agent name from the DB and updates the cache."""
-        snapshot = self.graph.get_state(self.config)
-        values = cast(dict[str, Any] | None, snapshot.values if snapshot else None)
-        if values:
-            self._cached_agent = cast(str, values.get("active_agent", "CustomerCare"))
         return self._cached_agent
 
     def add_human_message(self, text: str) -> None:
@@ -177,8 +167,6 @@ class VoiceSession:
                 if tool_name:
                     print(f"  [Calling: {tool_name}]")
 
-        # Sync cache with DB at the end to stay consistent
-        self._refresh_agent_name()
-        
         if yield_buffer:
             print(f"[{self._cached_agent}]: {yield_buffer.strip()}")
+

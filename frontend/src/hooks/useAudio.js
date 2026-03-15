@@ -106,14 +106,62 @@ export function useAudio() {
     setIsCapturing(false);
   }, []);
 
-  const processPlaybackQueue = useCallback(() => {
-    if (isPlayingRef.current || playbackQueueRef.current.length === 0) return;
+  /**
+   * Temporarily mute mic capture by disconnecting the processor.
+   * The mic stream stays open so resume is instant (no getUserMedia delay).
+   * This prevents the AI's playback audio from leaking back through
+   * speakers → mic → backend, which is the root cause of double-voice.
+   */
+  const muteCapture = useCallback(() => {
+    if (workletNodeRef.current) {
+      const { source, processor } = workletNodeRef.current;
+      try {
+        source.disconnect(processor);
+      } catch {
+        // Already disconnected — safe to ignore.
+      }
+    }
+  }, []);
 
+  /**
+   * Resume mic capture after AI playback finishes.
+   */
+  const unmuteCapture = useCallback(() => {
+    if (workletNodeRef.current) {
+      const { source, processor } = workletNodeRef.current;
+      try {
+        source.connect(processor);
+      } catch {
+        // Already connected — safe to ignore.
+      }
+    }
+  }, []);
+
+  /**
+   * Gapless audio playback: schedule chunks at precise future timestamps
+   * so there are no micro-gaps between sequential audio segments.
+   * Track ALL active sources so barge-in can stop them all.
+   */
+  const nextPlaybackTimeRef = useRef(0);
+  const activeSourcesRef = useRef(new Set());
+
+  const processPlaybackQueue = useCallback(() => {
+    if (playbackQueueRef.current.length === 0) {
+      if (!isPlayingRef.current) return;
+      return;
+    }
+
+    const ctx = getAudioContext();
+    const now = ctx.currentTime;
+
+    if (!isPlayingRef.current || nextPlaybackTimeRef.current < now) {
+      nextPlaybackTimeRef.current = now;
+    }
+    
     isPlayingRef.current = true;
     setIsPlaying(true);
 
     const { float32, sampleRate } = playbackQueueRef.current.shift();
-    const ctx = getAudioContext();
     const buffer = ctx.createBuffer(1, float32.length, sampleRate);
     buffer.getChannelData(0).set(float32);
 
@@ -121,20 +169,30 @@ export function useAudio() {
     source.buffer = buffer;
     source.connect(ctx.destination);
     currentSourceRef.current = source;
+    activeSourcesRef.current.add(source);
+
+    const startAt = nextPlaybackTimeRef.current;
+    const duration = float32.length / sampleRate;
+    nextPlaybackTimeRef.current = startAt + duration;
 
     source.onended = () => {
+      activeSourcesRef.current.delete(source);
       if (currentSourceRef.current === source) {
         currentSourceRef.current = null;
       }
-      isPlayingRef.current = false;
       if (playbackQueueRef.current.length > 0) {
         processPlaybackQueueRef.current?.();
-      } else {
+      } else if (activeSourcesRef.current.size === 0) {
+        isPlayingRef.current = false;
         setIsPlaying(false);
       }
     };
 
-    source.start();
+    source.start(startAt);
+
+    if (playbackQueueRef.current.length > 0) {
+      processPlaybackQueueRef.current?.();
+    }
   }, [getAudioContext]);
 
   useEffect(() => {
@@ -160,15 +218,18 @@ export function useAudio() {
 
   const clearPlaybackQueue = useCallback(() => {
     playbackQueueRef.current = [];
-    if (currentSourceRef.current) {
+    nextPlaybackTimeRef.current = 0;
+    // Stop ALL pre-scheduled sources, not just the last one
+    for (const src of activeSourcesRef.current) {
       try {
-        currentSourceRef.current.onended = null;
-        currentSourceRef.current.stop();
+        src.onended = null;
+        src.stop();
       } catch {
-        // Ignore already-stopped playback.
+        // Already stopped
       }
-      currentSourceRef.current = null;
     }
+    activeSourcesRef.current.clear();
+    currentSourceRef.current = null;
     isPlayingRef.current = false;
     setIsPlaying(false);
   }, []);
@@ -189,6 +250,8 @@ export function useAudio() {
     isUserSpeaking,
     startCapture,
     stopCapture,
+    muteCapture,
+    unmuteCapture,
     playAudioChunk,
     clearPlaybackQueue,
   };

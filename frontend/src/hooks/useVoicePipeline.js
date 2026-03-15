@@ -9,6 +9,7 @@ export function useVoicePipeline() {
   const [messages, setMessages] = useState([]);
   const [threadId, setThreadId] = useState(null);
   const [mode, setMode] = useState('voice');
+  const [isDenoisingEnabled, setIsDenoisingEnabled] = useState(false);
 
   const currentAiMessageRef = useRef('');
   const currentUserMessageRef = useRef('');
@@ -19,6 +20,8 @@ export function useVoicePipeline() {
     isUserSpeaking,
     startCapture,
     stopCapture,
+    muteCapture,
+    unmuteCapture,
     playAudioChunk,
     clearPlaybackQueue,
   } = useAudio();
@@ -236,6 +239,14 @@ export function useVoicePipeline() {
     setMode(newMode);
   }, [stopCapture, clearPlaybackQueue]);
 
+  const toggleDenoising = useCallback(() => {
+    setIsDenoisingEnabled((prev) => {
+      const next = !prev;
+      sendJson({ type: 'toggle_denoising', enabled: next });
+      return next;
+    });
+  }, [sendJson]);
+
   const effectivePipelineStatus = isPlaying ? 'speaking' : pipelineStatus;
 
   return {
@@ -250,5 +261,7 @@ export function useVoicePipeline() {
     toggleVoice,
     sendTextMessage,
     switchMode,
+    isDenoisingEnabled,
+    toggleDenoising,
   };
 }

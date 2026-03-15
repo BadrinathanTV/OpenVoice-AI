@@ -4,6 +4,7 @@ import { TranscriptPanel } from './components/TranscriptPanel';
 import { TextInputBar } from './components/TextInputBar';
 import { ConnectionStatus } from './components/ConnectionStatus';
 import { ModeToggle } from './components/ModeToggle';
+import { NoiseReductionToggle } from './components/NoiseReductionToggle';
 import { useVoicePipeline } from './hooks/useVoicePipeline';
 import { AGENTS } from './config/agents';
 import './index.css';
@@ -19,6 +20,8 @@ function App() {
     toggleVoice,
     sendTextMessage,
     switchMode,
+    isDenoisingEnabled,
+    toggleDenoising,
   } = useVoicePipeline();
 
   const isRecording = pipelineStatus === 'recording';
@@ -37,6 +40,7 @@ function App() {
           <span>OpenVoice AI</span>
         </div>
         <div className="app-header__controls">
+          <NoiseReductionToggle isEnabled={isDenoisingEnabled} onToggle={toggleDenoising} />
           <ModeToggle mode={mode} onSwitch={switchMode} />
           <ConnectionStatus status={connectionStatus} />
         </div>

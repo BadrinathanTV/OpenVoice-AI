@@ -17,6 +17,7 @@ from src.core.interfaces import ASRStreamHandle, IASR, ITTS, IVAD
 from src.agents.session import VoiceSession
 from src.utils.chunker import SentenceChunker
 from src.utils.language_guard import EnglishLanguageGuard
+from src.audio.denoiser import Denoiser
 
 SendCallback = Callable[[dict[str, Any]], Awaitable[None]]
 ENGLISH_RETRY_MESSAGE = "I can help in English. Please say that again in English."
@@ -33,6 +34,7 @@ class TurnTrace:
     llm_first_token_at: float | None = None
     first_tts_chunk_at: float | None = None
     first_audio_sent_at: float | None = None
+    user_speech_finished_at: float | None = None
     response_finished_at: float | None = None
     cancelled_at: float | None = None
 
@@ -55,6 +57,12 @@ class WebVoicePipeline:
         self.manual_stop_min_samples = int(sample_rate * 0.2)
         self.language_guard = EnglishLanguageGuard()
         self.session: Optional[VoiceSession] = None
+        self.use_denoising = False
+        try:
+            self.denoiser = Denoiser()
+        except Exception as e:
+            print(f"[WebPipeline] Failed to load denoiser: {e}")
+            self.denoiser = None
         self._response_lock = asyncio.Lock()
         self._cancel_response = False
         self._turn_sequence = 0
@@ -71,6 +79,9 @@ class WebVoicePipeline:
         self.last_partial_text = ""
         if not hasattr(self, 'short_query_history'):
             self.short_query_history: list[float] = []
+        # Reset denoiser buffer between speech turns to prevent audio bleed
+        if hasattr(self, 'denoiser') and self.denoiser is not None:
+            self.denoiser.buffer = np.array([], dtype=np.float32)
 
     def _start_turn_trace(self) -> TurnTrace:
         self._turn_sequence += 1
@@ -116,25 +127,25 @@ class WebVoicePipeline:
         def ms(start: float | None, end: float | None) -> str:
             if start is None or end is None:
                 return "n/a"
-            return f"{(end - start) * 1000:.0f}"
+            return f"{(end - start) * 1000:.0f}ms"
 
         thread_id = "unknown"
         if self.session is not None:
             thread_id = str(self.session.config["configurable"]["thread_id"])
 
-        print(
-            "[Latency] "
-            f"thread={thread_id} "
-            f"turn={trace.turn_id} "
-            f"outcome={outcome} "
-            f"speech_to_partial_ms={ms(trace.speech_started_at, trace.first_partial_at)} "
-            f"speech_to_final_ms={ms(trace.speech_started_at, trace.final_transcript_at)} "
-            f"llm_ttft_ms={ms(trace.response_started_at, trace.llm_first_token_at)} "
-            f"tts_enqueue_ms={ms(trace.response_started_at, trace.first_tts_chunk_at)} "
-            f"tts_first_audio_ms={ms(trace.response_started_at, trace.first_audio_sent_at)} "
-            f"turn_total_ms={ms(trace.speech_started_at, trace.response_finished_at or trace.cancelled_at)} "
-            f"preview='{trace.transcript_preview}'"
-        )
+        # Structured Latency Report
+        print(f"\n┌─── Voice Turn Performance: {outcome.upper()} ──────────────────────────")
+        print(f"│ Thread ID:  {thread_id}")
+        print(f"│ Turn ID:    {trace.turn_id}")
+        print(f"│ Preview:    \"{trace.transcript_preview}\"")
+        print(f"├────────────────────────────────────────────────────────────────")
+        print(f"│ ASR Latency:     {ms(trace.speech_started_at, trace.final_transcript_at)} (Final)")
+        print(f"│ LLM TTFT:        {ms(trace.response_started_at, trace.llm_first_token_at)}")
+        print(f"│ TTS First Audio: {ms(trace.response_started_at, trace.first_audio_sent_at)}")
+        print(f"│ E2E User-to-AI:  {ms(trace.user_speech_finished_at, trace.response_finished_at)}")
+        print(f"│ Total Session:   {ms(trace.speech_started_at, trace.response_finished_at or trace.cancelled_at)}")
+        print(f"└────────────────────────────────────────────────────────────────\n")
+
         if self.current_turn_trace is trace:
             self.current_turn_trace = None
 
@@ -157,6 +168,9 @@ class WebVoicePipeline:
         self.session = VoiceSession()
         self._reset_state()
         self.short_query_history = []
+        # Full denoiser reset (including neural network state) for new sessions
+        if self.denoiser is not None:
+            self.denoiser.reset()
         return self.session.config["configurable"]["thread_id"]
 
     @property
@@ -179,8 +193,15 @@ class WebVoicePipeline:
         # Convert raw 16-bit PCM bytes to float32 numpy array
         samples = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
 
-        rms_volume = np.sqrt(np.mean(samples ** 2))
-        speech_detected = self.vad.is_speech(samples) and rms_volume > 0.04
+        if self.use_denoising and self.denoiser:
+            try:
+                samples = self.denoiser.enhance(samples)
+            except Exception as e:
+                print(f"[WebPipeline] Denoising error: {e}")
+
+        rms_volume = np.sqrt(np.mean(samples ** 2)) if len(samples) > 0 else 0.0
+        is_vad_speech = self.vad.is_speech(samples) if len(samples) >= 160 else False
+        speech_detected = is_vad_speech and rms_volume > 0.02 
 
         if speech_detected:
             if not self.is_speaking:
@@ -220,8 +241,8 @@ class WebVoicePipeline:
         elif self.is_speaking:
             self.speech_buffer.append(samples)
             self.silence_chunks += 1
-            # ~1600ms of silence (32ms * 50 chunks)
-            if self.silence_chunks > 50:
+            # ~800ms of silence (32ms * 25 chunks)
+            if self.silence_chunks > 25:
                 if self.asr.supports_streaming:
                     final_text = self._finish_streaming_text(
                         min_samples=self.min_speech_samples
@@ -235,6 +256,10 @@ class WebVoicePipeline:
                 )
                 if audio_array is None:
                     return {"status": "listening"}
+
+                trace = self._ensure_turn_trace()
+                if trace.user_speech_finished_at is None:
+                    trace.user_speech_finished_at = time.perf_counter()
 
                 return {"status": "speech_end", "audio": audio_array}
             return {"status": "accumulating"}
@@ -310,7 +335,9 @@ class WebVoicePipeline:
 
         self._reset_state()
         if final_text:
-            self._mark_final_transcript(final_text)
+            trace = self._mark_final_transcript(final_text)
+            if trace.user_speech_finished_at is None:
+                trace.user_speech_finished_at = time.perf_counter()
         return final_text or None
 
     def finalize_current_utterance(self) -> dict[str, Any]:
@@ -332,6 +359,11 @@ class WebVoicePipeline:
         )
         if audio_array is None:
             return {"status": "listening"}
+            
+        trace = self._ensure_turn_trace()
+        if trace.user_speech_finished_at is None:
+            trace.user_speech_finished_at = time.perf_counter()
+            
         return {"status": "speech_end", "audio": audio_array}
 
     def transcribe(self, audio_array: np.ndarray) -> str:
@@ -391,6 +423,8 @@ class WebVoicePipeline:
             return
 
         trace = self._mark_final_transcript(stripped_text)
+        if trace.user_speech_finished_at is None:
+            trace.user_speech_finished_at = time.perf_counter()
 
         language_decision = self.language_guard.evaluate(stripped_text)
         if not language_decision.allow:
@@ -401,7 +435,7 @@ class WebVoicePipeline:
             )
             await self._send_english_retry(send_callback)
             trace.response_finished_at = time.perf_counter()
-            self._log_turn_trace(trace, "blocked_non_english")
+            self._log_turn_trace(trace, "rejected")
             return
 
         # LAYER 2 FILTER: Short Text Rolling Window
@@ -443,7 +477,7 @@ class WebVoicePipeline:
         tts_queue: asyncio.Queue[tuple[str, str] | None] = asyncio.Queue(maxsize=4)
         
         async def tts_worker() -> None:
-            """Background worker to consume chunks from the queue and send TTS audio sequentially."""
+            """Background worker that streams TTS sub-chunks to the browser as they're generated."""
             while True:
                 item = await tts_queue.get()
                 if item is None:  # Sentinel value to exit worker
@@ -461,23 +495,44 @@ class WebVoicePipeline:
                 )
 
                 tts_start = time.time()
-                # Run synchronous TTS via executor to avoid blocking the event loop
-                audio_data, fs = await asyncio.get_event_loop().run_in_executor(
-                    None, tts.synthesize, sentence
-                )
-                tts_latency = time.time() - tts_start
-                print(f"  [TTS] '{sentence[:40]}...' ({tts_latency:.2f}s)")
+                
+                # Use streaming TTS when available for lower time-to-first-audio
+                if hasattr(tts, 'synthesize_streaming'):
+                    loop = asyncio.get_event_loop()
+                    chunks = await loop.run_in_executor(
+                        None, lambda: list(tts.synthesize_streaming(sentence))
+                    )
+                    tts_latency = time.time() - tts_start
+                    print(f"  [TTS] '{sentence[:40]}...' ({tts_latency:.2f}s, {len(chunks)} chunks)")
+                    
+                    for audio_data, fs in chunks:
+                        if self._cancel_response or len(audio_data) == 0:
+                            break
+                        if trace.first_audio_sent_at is None:
+                            trace.first_audio_sent_at = time.perf_counter()
+                        pcm_data = (audio_data * 32767).astype(np.int16).tobytes()
+                        await send_callback({
+                            "type": "audio",
+                            "data": pcm_data,
+                            "sample_rate": fs,
+                        })
+                else:
+                    # Fallback for TTS models without streaming
+                    audio_data, fs = await asyncio.get_event_loop().run_in_executor(
+                        None, tts.synthesize, sentence
+                    )
+                    tts_latency = time.time() - tts_start
+                    print(f"  [TTS] '{sentence[:40]}...' ({tts_latency:.2f}s)")
 
-                # Convert float32 audio to 16-bit PCM bytes for the browser
-                if not self._cancel_response and len(audio_data) > 0:
-                    if trace.first_audio_sent_at is None:
-                        trace.first_audio_sent_at = time.perf_counter()
-                    pcm_data = (audio_data * 32767).astype(np.int16).tobytes()
-                    await send_callback({
-                        "type": "audio",
-                        "data": pcm_data,
-                        "sample_rate": fs,
-                    })
+                    if not self._cancel_response and len(audio_data) > 0:
+                        if trace.first_audio_sent_at is None:
+                            trace.first_audio_sent_at = time.perf_counter()
+                        pcm_data = (audio_data * 32767).astype(np.int16).tobytes()
+                        await send_callback({
+                            "type": "audio",
+                            "data": pcm_data,
+                            "sample_rate": fs,
+                        })
                 
                 tts_queue.task_done()
 
