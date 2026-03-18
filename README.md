@@ -17,7 +17,7 @@
 
 | Feature | Description |
 |---|---|
-| 🗣️ **Real-time Voice** | Speak and listen in real-time via the browser — VAD detects speech, ASR transcribes, LLM responds, TTS speaks back |
+| 🗣️ **Real-time Voice** | Speak and listen in real-time via the browser using WebRTC — VAD detects speech, ASR transcribes, LLM responds, TTS speaks back |
 | 🤖 **Multi-Agent Swarm** | 3 specialized agents (Customer Care, Shopper, Order Ops) with seamless handoffs via LangGraph |
 | 🎨 **Animated Agent Orbs** | Each agent has a unique color identity with animated orb visualizations that glow when speaking |
 | 💬 **Dual Mode** | Switch between Voice mode (mic) and Text mode (typing) on the fly |
@@ -25,6 +25,9 @@
 | 🧠 **Conversation Memory** | In-memory checkpointer (`MemorySaver`) persists conversation state across the session for zero latency |
 | ⚡ **GPU Accelerated** | VAD (Silero), ASR (Qwen3-0.6B), and TTS (Piper) all run on CUDA when available |
 | 🎤 **Interrupt Support** | Interrupt the AI mid-sentence — it remembers where it was cut off |
+| 🔇 **Noise Reduction** | Real-time audio denoising using DeepFilterNet3 ONNX model (toggleable via UI) |
+| 🌐 **Language Guard** | Production-grade English language enforcement gate using `langid` to drop spurious noise/translations |
+| ⏱️ **Latency Tracking** | Granular latency metrics tracking (TTFT, TTFA, and agent switching) |
 
 ---
 
@@ -35,9 +38,11 @@ graph TB
     subgraph Frontend["React Frontend (Vite)"]
         UI[Animated UI Orbs]
         Audio[Web Audio API]
-        WS_Client[WebSocket Client]
+        RTC_Client[WebRTC Client]
+        WS_Client[WebSocket Client (Text Chat)]
         
-        Audio <--> WS_Client
+        Audio <--> RTC_Client
+        RTC_Client <--> UI
         WS_Client <--> UI
     end
 
@@ -53,10 +58,10 @@ graph TB
         end
         
         subgraph Agents["LangGraph Swarm"]
-            State[(MemorySaver Checkpointer)]
-            CC[CustomerCare (Alpha)]
-            Shop[Shopper (Gamma)]
-            Ops[OrderOps (Beta)]
+            State[("MemorySaver Checkpointer")]
+            CC["CustomerCare (Alpha)"]
+            Shop["Shopper (Gamma)"]
+            Ops["OrderOps (Beta)"]
             
             CC <--> State
             Shop <--> State
@@ -69,8 +74,8 @@ graph TB
         Pipeline <--> Agents
     end
 
-    WS_Client <-->|ws://voice or ws://chat| WS_Server
-    Audio <-->|WebRTC Voice| WebRTC
+    WS_Client <-->|ws://chat| WS_Server
+    RTC_Client <-->|WebRTC Data Channels| WebRTC
 ```
 
 ---
@@ -105,8 +110,9 @@ OpenVoice AI/
 │   │   │       └── order_ops.py
 │   │   ├── asr/                    # 🎤 Automatic Speech Recognition
 │   │   │   └── whisper.py          # Qwen3-ASR-0.6B model wrapper
-│   │   ├── audio/                  # 🔊 Audio I/O (CLI mode)
-│   │   │   └── io.py               # sounddevice mic/speaker (CLI only)
+│   │   ├── audio/                  # 🔊 Audio processing & I/O
+│   │   │   ├── io.py               # sounddevice mic/speaker (CLI only)
+│   │   │   └── denoiser.py         # DeepFilterNet3 ONNX audio denoiser
 │   │   ├── core/                   # ⚙️ Core abstractions
 │   │   │   ├── interfaces.py       # IVAD, IASR, ILLM, ITTS interfaces
 │   │   │   └── pipeline.py         # Original CLI voice pipeline
@@ -115,7 +121,8 @@ OpenVoice AI/
 │   │   ├── tts/                    # 🗣️ Text-to-Speech
 │   │   │   └── piper.py            # Piper TTS (ONNX, GPU-accelerated)
 │   │   ├── utils/                  # 🛠️ Utilities
-│   │   │   └── chunker.py          # SentenceChunker for TTS streaming
+│   │   │   ├── chunker.py          # SentenceChunker for TTS streaming
+│   │   │   └── language_guard.py   # English language enforcement gate
 │   │   └── vad/                    # 🎯 Voice Activity Detection
 │   │       └── silero.py           # Silero VAD (PyTorch, GPU)
 │   ├── models/                     # 📦 Downloaded TTS voice models
@@ -130,9 +137,11 @@ OpenVoice AI/
 │   │   │   ├── TranscriptPanel.jsx # Conversation sidebar
 │   │   │   ├── TextInputBar.jsx    # Text chat input
 │   │   │   ├── ConnectionStatus.jsx# WebSocket status dot
+│   │   │   ├── NoiseReductionToggle.jsx # UI toggle for audio denoiser
 │   │   │   └── ModeToggle.jsx      # Voice ↔ Text switch
 │   │   ├── hooks/                  # 🪝 Custom React hooks
-│   │   │   ├── useWebSocket.js     # WebSocket connection management
+│   │   │   ├── useWebSocket.js     # WebSocket connection management (Text)
+│   │   │   ├── useWebRTC.js        # WebRTC connection management (Voice)
 │   │   │   ├── useAudio.js         # Mic capture + TTS playback
 │   │   │   └── useVoicePipeline.js # Orchestration hook
 │   │   ├── config/
@@ -270,14 +279,15 @@ The agent orb transitions through visual states:
 | `GET` | `/api/health` | Health check, shows if models are loaded |
 | `GET` | `/api/agents` | Returns list of available agents with metadata |
 
-### WebSocket
+### Realtime Transport (WebRTC / WebSocket)
 
 | Path | Mode | Protocol |
 |---|---|---|
-| `/ws/voice` | Voice mode | Binary (PCM audio) + JSON (status/transcripts) |
-| `/ws/chat` | Text mode | JSON only |
+| `/api/webrtc/offer` | Voice mode (primary) | WebRTC Data Channels (Binary PCM + JSON) |
+| `/ws/voice` | Voice mode (fallback) | WebSocket (Binary PCM + JSON) |
+| `/ws/chat` | Text mode | WebSocket (JSON only) |
 
-**WebSocket message types (server → client):**
+**Control message types (server → client):**
 
 ```json
 {"type": "session", "threadId": "...", "agent": "CustomerCare"}
@@ -302,6 +312,8 @@ The agent orb transitions through visual states:
 | ASR | Qwen3-ASR-0.6B (GPU) |
 | TTS | Piper TTS (ONNX, GPU) |
 | VAD | Silero VAD (PyTorch, GPU) |
+| Denoising | DeepFilterNet3 (ONNX) |
+| Language ID | langid |
 | Database | In-memory (MemorySaver) |
 | Package Manager | uv |
 
@@ -311,7 +323,7 @@ The agent orb transitions through visual states:
 | Framework | React 19 + Vite |
 | Styling | Vanilla CSS (design tokens) |
 | Audio | Web Audio API |
-| Communication | WebSocket (native) |
+| Communication | WebRTC (Data Channels) / WebSocket |
 | Font | Inter (Google Fonts) |
 
 ---
@@ -323,7 +335,7 @@ The codebase follows SOLID design principles:
 - **Single Responsibility** — Each component, hook, and module has one job (e.g., `VoiceOrb` only renders, `useAudio` only handles audio)
 - **Open/Closed** — Agent config in `agents.js` is extendable without modifying components. Add a new agent by adding an entry.
 - **Liskov Substitution** — All backend modules implement abstract interfaces (`IVAD`, `IASR`, `ILLM`, `ITTS`). Swap implementations freely.
-- **Interface Segregation** — `useVoicePipeline` exposes a clean API without leaking WebSocket or Audio internals to components.
+- **Interface Segregation** — `useVoicePipeline` exposes a clean API without leaking WebRTC/WebSocket or Audio internals to components.
 - **Dependency Inversion** — React components receive data via props from hooks, not from globals. Backend pipeline depends on interfaces, not concrete classes.
 
 ---
@@ -335,12 +347,12 @@ flowchart TD
     subgraph Browser["Browser Client"]
         Mic[Microphone API]
         Speak[Audio Playback]
-        Mic -->|32ms PCM chunks| WS1[WebSocket]
-        WS2[WebSocket] -->|Base64 PCM| Speak
+        Mic -->|32ms PCM chunks| RTC[WebRTC Data Channels]
+        RTC -->|Base64 PCM| Speak
     end
 
     subgraph Backend["FastAPI Backend"]
-        WS1 --> VAD{Silero VAD}
+        RTC --> VAD{Silero VAD}
         VAD -->|Noise| Drop[Discard]
         VAD -->|"speech (vol > 0.005)"| Buf[Audio Buffer]
         
@@ -349,13 +361,13 @@ flowchart TD
         
         Swarm -->|Token Stream| Chunker[Sentence Chunker]
         Chunker -->|Complete Sentences| TTS[Piper TTS]
-        TTS -->|Audio Bytes| WS2
+        TTS -->|Audio Bytes| RTC
     end
     
     subgraph Agents["LangGraph Agents"]
-        Swarm <--> CC[Customer Care (Alpha)]
-        Swarm <--> SH[Shopper (Gamma)]
-        Swarm <--> OO[Order Ops (Beta)]
+        Swarm <--> CC["Customer Care (Alpha)"]
+        Swarm <--> SH["Shopper (Gamma)"]
+        Swarm <--> OO["Order Ops (Beta)"]
     end
 ```
 
@@ -373,6 +385,8 @@ flowchart TD
 | `ASR_BACKEND` | ❌ | `transformers` | ASR backend: `transformers` or `vllm` |
 | `ASR_STREAMING_CHUNK_SIZE_SEC` | ❌ | `0.64` | Streaming ASR decode chunk size in seconds |
 | `ASR_ALLOW_BACKEND_FALLBACK` | ❌ | `true` | Fall back to transformers if vLLM ASR fails to initialize |
+| `ASR_ENFORCE_ENGLISH` | ❌ | `true` | Enable backend language enforcement gate |
+| `ASR_ENGLISH_CONFIDENCE_THRESHOLD` | ❌ | `0.80` | Language ID confidence threshold |
 | `DATABASE_URL` | ❌ | `mongodb://localhost:27017/` | MongoDB connection URL |
 
 ### Adding a New Agent
