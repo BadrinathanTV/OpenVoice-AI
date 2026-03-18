@@ -39,7 +39,7 @@ graph TB
         UI[Animated UI Orbs]
         Audio[Web Audio API]
         RTC_Client[WebRTC Client]
-        WS_Client[WebSocket Client (Text Chat)]
+        WS_Client["WebSocket Client (Text Chat)"]
         
         Audio <--> RTC_Client
         RTC_Client <--> UI
@@ -47,14 +47,14 @@ graph TB
     end
 
     subgraph Backend["FastAPI Backend"]
-        WS_Server[WebSocket Endpoint]
-        WebRTC[WebRTC Endpoint]
+        WS_Server["WebSocket Endpoint"]
+        WebRTC["WebRTC Endpoint"]
         Pipeline[WebVoicePipeline]
         
         subgraph Models["ML Models"]
-            VAD[Silero VAD]
-            ASR[Qwen3 ASR]
-            TTS[Piper TTS]
+            VAD["Silero VAD"]
+            ASR["Qwen3 ASR"]
+            TTS["Piper TTS"]
         end
         
         subgraph Agents["LangGraph Swarm"]
@@ -345,9 +345,9 @@ The codebase follows SOLID design principles:
 ```mermaid
 flowchart TD
     subgraph Browser["Browser Client"]
-        Mic[Microphone API]
-        Speak[Audio Playback]
-        Mic -->|32ms PCM chunks| RTC[WebRTC Data Channels]
+        Mic["Microphone API"]
+        Speak["Audio Playback"]
+        Mic -->|32ms PCM chunks| RTC["WebRTC Data Channels"]
         RTC -->|Base64 PCM| Speak
     end
 
@@ -356,11 +356,11 @@ flowchart TD
         VAD -->|Noise| Drop[Discard]
         VAD -->|"speech (vol > 0.005)"| Buf[Audio Buffer]
         
-        Buf -->|Complete Phrase| ASR[Qwen3 ASR]
+        Buf -->|Complete Phrase| ASR["Qwen3 ASR"]
         ASR -->|Text| Swarm{LangGraph Swarm}
         
         Swarm -->|Token Stream| Chunker[Sentence Chunker]
-        Chunker -->|Complete Sentences| TTS[Piper TTS]
+        Chunker -->|Complete Sentences| TTS["Piper TTS"]
         TTS -->|Audio Bytes| RTC
     end
     
