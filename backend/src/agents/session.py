@@ -126,8 +126,8 @@ class VoiceSession:
         Streams token chunks as they arrive from the LangGraph execution.
         """
         
-        agent_before = self._cached_agent
-        print(f"\n[Agent: {agent_before}] Processing: \"{user_text}\"")
+        # agent_before = self._cached_agent
+        # print(f"\n[Agent: {agent_before}] Processing: \"{user_text}\"")
         
         # We only pass the new user message. The checkpointer retains the rest.
         inputs: dict[str, list[BaseMessage]] = {

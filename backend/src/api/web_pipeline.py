@@ -129,22 +129,21 @@ class WebVoicePipeline:
                 return "n/a"
             return f"{(end - start) * 1000:.0f}ms"
 
+        def raw_ms(start: float | None, end: float | None) -> float:
+            if start is None or end is None:
+                return 0.0
+            return (end - start) * 1000.0
+
         thread_id = "unknown"
         if self.session is not None:
             thread_id = str(self.session.config["configurable"]["thread_id"])
 
-        # Structured Latency Report
-        print(f"\n┌─── Voice Turn Performance: {outcome.upper()} ──────────────────────────")
-        print(f"│ Thread ID:  {thread_id}")
-        print(f"│ Turn ID:    {trace.turn_id}")
-        print(f"│ Preview:    \"{trace.transcript_preview}\"")
-        print(f"├────────────────────────────────────────────────────────────────")
-        print(f"│ ASR Latency:     {ms(trace.speech_started_at, trace.final_transcript_at)} (Final)")
-        print(f"│ LLM TTFT:        {ms(trace.response_started_at, trace.llm_first_token_at)}")
-        print(f"│ TTS First Audio: {ms(trace.response_started_at, trace.first_audio_sent_at)}")
-        print(f"│ E2E User-to-AI:  {ms(trace.user_speech_finished_at, trace.response_finished_at)}")
-        print(f"│ Total Session:   {ms(trace.speech_started_at, trace.response_finished_at or trace.cancelled_at)}")
-        print(f"└────────────────────────────────────────────────────────────────\n")
+        ttft = raw_ms(trace.response_started_at, trace.llm_first_token_at)
+        ttfa = raw_ms(trace.llm_first_token_at, trace.first_audio_sent_at)
+        combined = ttft + ttfa
+
+        # Simplified Preview Report
+        print(f"Preview: \"{trace.transcript_preview}\"")
 
         if self.current_turn_trace is trace:
             self.current_turn_trace = None
@@ -371,7 +370,7 @@ class WebVoicePipeline:
         start = time.time()
         text = self.asr.transcribe(audio_array)
         latency = time.time() - start
-        print(f"[WebPipeline ASR] '{text}' ({latency:.2f}s)")
+        print(f"[WebPipeline ASR] '{text}'")
         return text
 
     def cancel_active_response(self) -> None:
@@ -503,7 +502,7 @@ class WebVoicePipeline:
                         None, lambda: list(tts.synthesize_streaming(sentence))
                     )
                     tts_latency = time.time() - tts_start
-                    print(f"  [TTS] '{sentence[:40]}...' ({tts_latency:.2f}s, {len(chunks)} chunks)")
+                    print(f"  [TTS] '{sentence[:40]}...'")
                     
                     for audio_data, fs in chunks:
                         if self._cancel_response or len(audio_data) == 0:
@@ -522,7 +521,7 @@ class WebVoicePipeline:
                         None, tts.synthesize, sentence
                     )
                     tts_latency = time.time() - tts_start
-                    print(f"  [TTS] '{sentence[:40]}...' ({tts_latency:.2f}s)")
+                    print(f"  [TTS] '{sentence[:40]}...'")
 
                     if not self._cancel_response and len(audio_data) > 0:
                         if trace.first_audio_sent_at is None:
