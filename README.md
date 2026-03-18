@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white" />
   <img src="https://img.shields.io/badge/FastAPI-0.135-009688?logo=fastapi&logoColor=white" />
   <img src="https://img.shields.io/badge/LangGraph-Swarm-orange?logo=langchain&logoColor=white" />
-  <img src="https://img.shields.io/badge/MongoDB-Checkpoint-47A248?logo=mongodb&logoColor=white" />
+  <img src="https://img.shields.io/badge/MemorySaver-Checkpoint-47A248?logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/GPU-CUDA-76B900?logo=nvidia&logoColor=white" />
 </p>
 
@@ -22,7 +22,7 @@
 | 🎨 **Animated Agent Orbs** | Each agent has a unique color identity with animated orb visualizations that glow when speaking |
 | 💬 **Dual Mode** | Switch between Voice mode (mic) and Text mode (typing) on the fly |
 | 🔄 **Live Agent Handoffs** | Agents transfer conversations to each other based on context — orb morphs colors during handoff |
-| 🧠 **Conversation Memory** | MongoDB-backed checkpointer persists conversation state across the session |
+| 🧠 **Conversation Memory** | In-memory checkpointer (`MemorySaver`) persists conversation state across the session for zero latency |
 | ⚡ **GPU Accelerated** | VAD (Silero), ASR (Qwen3-0.6B), and TTS (Piper) all run on CUDA when available |
 | 🎤 **Interrupt Support** | Interrupt the AI mid-sentence — it remembers where it was cut off |
 
@@ -43,6 +43,7 @@ graph TB
 
     subgraph Backend["FastAPI Backend"]
         WS_Server[WebSocket Endpoint]
+        WebRTC[WebRTC Endpoint]
         Pipeline[WebVoicePipeline]
         
         subgraph Models["ML Models"]
@@ -52,10 +53,10 @@ graph TB
         end
         
         subgraph Agents["LangGraph Swarm"]
-            State[(MongoDB Checkpointer)]
-            CC[CustomerCare]
-            Shop[Shopper]
-            Ops[OrderOps]
+            State[(MemorySaver Checkpointer)]
+            CC[CustomerCare (Alpha)]
+            Shop[Shopper (Gamma)]
+            Ops[OrderOps (Beta)]
             
             CC <--> State
             Shop <--> State
@@ -63,11 +64,13 @@ graph TB
         end
         
         WS_Server <--> Pipeline
+        WebRTC <--> Pipeline
         Pipeline <--> Models
         Pipeline <--> Agents
     end
 
     WS_Client <-->|ws://voice or ws://chat| WS_Server
+    Audio <-->|WebRTC Voice| WebRTC
 ```
 
 ---
@@ -76,9 +79,9 @@ graph TB
 
 | Agent | Voice | Color | Specialization | Tools |
 |---|---|---|---|---|
-| **Customer Care** | 🇬🇧 Alba (British) | 🟣 `#6C63FF` | Returns, refunds, policies, general help | `lookup_policy`, transfer tools |
-| **Shopper** | 🇺🇸 Bryce (American) | 🟢 `#00C9A7` | Product search, recommendations, catalog | `search_catalog`, transfer tools |
-| **Order Ops** | 🇺🇸 HFC Female | 🔴 `#FF6B6B` | Order tracking, delivery status, operations | `check_order_status`, transfer tools |
+| **Customer Care (Alpha)** | 🇬🇧 Alba (British) | 🟣 `#4B8DFF` | Returns, refunds, policies, general help | `lookup_policy`, transfer tools |
+| **Shopper (Gamma)** | 🇺🇸 Bryce (American) | 🟢 `#00C9A7` | Product search, recommendations, catalog | `search_catalog`, transfer tools |
+| **Order Ops (Beta)** | 🇺🇸 HFC Female | 🔴 `#FF6FAE` | Order tracking, delivery status, operations | `check_order_status`, transfer tools |
 
 Each agent can **transfer seamlessly** to another via LangGraph tool calls. The user never notices the handoff — the orb simply morphs its color.
 
@@ -140,10 +143,10 @@ OpenVoice AI/
 │   ├── index.html
 │   ├── vite.config.js
 │   └── package.json
-
+│
 ├── pyproject.toml                  # Python dependencies (uv)
 ├── uv.lock                         # Locked dependency versions
-
+│
 └── .gitignore
 ```
 
@@ -158,7 +161,6 @@ OpenVoice AI/
 | **Python** | 3.12.x | Backend runtime |
 | **uv** | Latest | Python package manager |
 | **Node.js** | 18+ | Frontend tooling |
-| **MongoDB** | 4.4+ | Session persistence |
 | **CUDA** | 11.8+ | GPU acceleration (optional) |
 
 ### 1. Clone the Repository
@@ -294,12 +296,13 @@ The agent orb transitions through visual states:
 |---|---|
 | Runtime | Python 3.11+ |
 | Web Server | FastAPI + Uvicorn |
+| WebRTC | aiortc |
 | Agent Framework | LangGraph Swarm |
 | LLM | OpenAI GPT-4o-mini |
 | ASR | Qwen3-ASR-0.6B (GPU) |
 | TTS | Piper TTS (ONNX, GPU) |
 | VAD | Silero VAD (PyTorch, GPU) |
-| Database | MongoDB (checkpoint persistence) |
+| Database | In-memory (MemorySaver) |
 | Package Manager | uv |
 
 ### Frontend
@@ -350,9 +353,9 @@ flowchart TD
     end
     
     subgraph Agents["LangGraph Agents"]
-        Swarm <--> CC[Customer Care]
-        Swarm <--> SH[Shopper]
-        Swarm <--> OO[Order Ops]
+        Swarm <--> CC[Customer Care (Alpha)]
+        Swarm <--> SH[Shopper (Gamma)]
+        Swarm <--> OO[Order Ops (Beta)]
     end
 ```
 
@@ -390,4 +393,3 @@ This project is for educational and research purposes.
 <p align="center">
   Built with ❤️ by <strong>The Three !</strong>
 </p>
-
