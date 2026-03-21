@@ -531,6 +531,17 @@ class WebVoicePipeline:
                             break
 
                         audio_data, fs = chunk
+                    stream = tts.synthesize_streaming(sentence)
+                    print(f"  [TTS] '{sentence[:40]}...'")
+
+                    while True:
+                        chunk = await loop.run_in_executor(
+                            None, lambda: next(stream, None)
+                        )
+                        if chunk is None:
+                            break
+
+                        audio_data, fs = chunk
                         if self._cancel_response or len(audio_data) == 0:
                             continue
 

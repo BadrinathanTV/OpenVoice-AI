@@ -29,7 +29,20 @@ if [ "${OPENVOICE_ACCESS_LOG:-0}" = "1" ]; then
     ACCESS_LOG_FLAG=""
 fi
 UVICORN_LOG_LEVEL="${OPENVOICE_UVICORN_LOG_LEVEL:-warning}"
-uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000 --log-level "${UVICORN_LOG_LEVEL}" ${ACCESS_LOG_FLAG} &
+
+ROOT_DIR="$(pwd)/.."
+VENV_BIN="${ROOT_DIR}/.venv/bin"
+
+if [ -x "${VENV_BIN}/uvicorn" ]; then
+    PYTHONPATH="${PWD}:${PYTHONPATH}" "${VENV_BIN}/uvicorn" src.api.server:app --host 0.0.0.0 --port 8000 --log-level "${UVICORN_LOG_LEVEL}" ${ACCESS_LOG_FLAG} &
+elif [ -x "${VENV_BIN}/python" ]; then
+    PYTHONPATH="${PWD}:${PYTHONPATH}" "${VENV_BIN}/python" -m uvicorn src.api.server:app --host 0.0.0.0 --port 8000 --log-level "${UVICORN_LOG_LEVEL}" ${ACCESS_LOG_FLAG} &
+elif command -v uv >/dev/null 2>&1; then
+    uv run uvicorn src.api.server:app --host 0.0.0.0 --port 8000 --log-level "${UVICORN_LOG_LEVEL}" ${ACCESS_LOG_FLAG} &
+else
+    echo -e "${RED}❌ Error: no usable Python backend launcher found. Create .venv or install uv.${NC}"
+    exit 1
+fi
 BACKEND_PID=$!
 cd ..
 

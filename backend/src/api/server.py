@@ -55,6 +55,7 @@ def _build_pipeline() -> "WebVoicePipeline":
     from src.asr.qwen import ASRModel
     from src.tts.piper import TTSModel
     from src.api.web_pipeline import WebVoicePipeline
+    from src.tts.kitten import TTSModel as KittenTTS
 
     print("[Server] Loading AI models...")
     vad = SileroVAD()
@@ -64,6 +65,11 @@ def _build_pipeline() -> "WebVoicePipeline":
         "Shopper": TTSModel(model_name="en_US-bryce-medium", speed=1.20),
         "OrderOps": TTSModel(model_name="en_US-hfc_female-medium"),
     }
+    # tts_models = {
+    #     "CustomerCare": KittenTTS(voice="Kiki", speed=1.0),
+    #     "Shopper": KittenTTS(voice="Bella", speed=1.0),
+    #     "OrderOps": KittenTTS(voice="Jasper", speed=1.0),
+    # }
     pipeline = WebVoicePipeline(vad=vad, asr=asr, tts_models=tts_models)
     print("[Server] AI models ready.")
     return pipeline
