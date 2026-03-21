@@ -77,10 +77,10 @@ class WebVoicePipeline:
         self.active_speech_chunks = 0
         self.asr_stream: Optional[ASRStreamHandle] = None
         self.last_partial_text = ""
-        if not hasattr(self, 'short_query_history'):
+        if not hasattr(self, "short_query_history"):
             self.short_query_history: list[float] = []
         # Reset denoiser buffer between speech turns to prevent audio bleed
-        if hasattr(self, 'denoiser') and self.denoiser is not None:
+        if hasattr(self, "denoiser") and self.denoiser is not None:
             self.denoiser.buffer = np.array([], dtype=np.float32)
 
     def _start_turn_trace(self) -> TurnTrace:
@@ -142,8 +142,11 @@ class WebVoicePipeline:
         ttfa = raw_ms(trace.llm_first_token_at, trace.first_audio_sent_at)
         combined = ttft + ttfa
 
-        # Simplified Preview Report
-        print(f"Preview: \"{trace.transcript_preview}\"")
+        print(
+            f"[Latency][turn={trace.turn_id}] "
+            f"TTFT={ttft:.0f}ms | TTFA={ttfa:.0f}ms | Combined={combined:.0f}ms | "
+            f"preview='{trace.transcript_preview}'"
+        )
 
         if self.current_turn_trace is trace:
             self.current_turn_trace = None
@@ -198,9 +201,9 @@ class WebVoicePipeline:
             except Exception as e:
                 print(f"[WebPipeline] Denoising error: {e}")
 
-        rms_volume = np.sqrt(np.mean(samples ** 2)) if len(samples) > 0 else 0.0
+        rms_volume = np.sqrt(np.mean(samples**2)) if len(samples) > 0 else 0.0
         is_vad_speech = self.vad.is_speech(samples) if len(samples) >= 160 else False
-        speech_detected = is_vad_speech and rms_volume > 0.02 
+        speech_detected = is_vad_speech and rms_volume > 0.02
 
         if speech_detected:
             if not self.is_speaking:
@@ -208,7 +211,7 @@ class WebVoicePipeline:
                 self.speech_buffer.append(samples)
                 self.active_speech_chunks += 1
                 self._stream_audio_chunk(samples)
-                
+
                 # Require 6 consecutive chunks (192ms) of constant "speech" to barge-in
                 if self.active_speech_chunks >= 6:
                     self.is_speaking = True
@@ -216,7 +219,7 @@ class WebVoicePipeline:
                     self.chunks_since_last_partial = 0
                     self._start_turn_trace()
                     return {"status": "speech_detected"}
-                
+
                 return {"status": "accumulating_pre_speech"}
             else:
                 # We are officially speaking. Keep buffering.
@@ -227,15 +230,18 @@ class WebVoicePipeline:
                 partial_text = self._stream_audio_chunk(samples)
                 if partial_text:
                     return {"status": "speech_partial", "text": partial_text}
-                
+
                 # Emit a partial transcript every 15 chunks (~480ms)
-                if not self.asr.supports_streaming and self.chunks_since_last_partial >= 15:
+                if (
+                    not self.asr.supports_streaming
+                    and self.chunks_since_last_partial >= 15
+                ):
                     self.chunks_since_last_partial = 0
                     audio_array = np.concatenate(self.speech_buffer)
                     if len(audio_array.shape) > 1:
                         audio_array = audio_array[:, 0]
                     return {"status": "speech_partial", "audio": audio_array}
-                    
+
                 return {"status": "accumulating"}
         elif self.is_speaking:
             self.speech_buffer.append(samples)
@@ -358,11 +364,11 @@ class WebVoicePipeline:
         )
         if audio_array is None:
             return {"status": "listening"}
-            
+
         trace = self._ensure_turn_trace()
         if trace.user_speech_finished_at is None:
             trace.user_speech_finished_at = time.perf_counter()
-            
+
         return {"status": "speech_end", "audio": audio_array}
 
     def transcribe(self, audio_array: np.ndarray) -> str:
@@ -382,13 +388,15 @@ class WebVoicePipeline:
 
     async def _send_english_retry(self, send_callback: SendCallback) -> None:
         active_agent = self.active_agent_name
-        await send_callback({
-            "type": "transcript",
-            "role": "ai",
-            "text": ENGLISH_RETRY_MESSAGE,
-            "agent": active_agent,
-            "partial": False,
-        })
+        await send_callback(
+            {
+                "type": "transcript",
+                "role": "ai",
+                "text": ENGLISH_RETRY_MESSAGE,
+                "agent": active_agent,
+                "partial": False,
+            }
+        )
 
         tts = self.tts_models.get(active_agent, list(self.tts_models.values())[0])
         audio_data, fs = await asyncio.get_event_loop().run_in_executor(
@@ -396,11 +404,13 @@ class WebVoicePipeline:
         )
         if len(audio_data) > 0:
             pcm_data = (audio_data * 32767).astype(np.int16).tobytes()
-            await send_callback({
-                "type": "audio",
-                "data": pcm_data,
-                "sample_rate": fs,
-            })
+            await send_callback(
+                {
+                    "type": "audio",
+                    "data": pcm_data,
+                    "sample_rate": fs,
+                }
+            )
 
         await send_callback({"type": "status", "value": "idle"})
 
@@ -442,10 +452,12 @@ class WebVoicePipeline:
         if len(words) < 4:
             current_time = time.time()
             self.short_query_history.append(current_time)
-            
+
             # Remove timestamps older than 5 seconds
-            self.short_query_history = [t for t in self.short_query_history if current_time - t <= 5.0]
-            
+            self.short_query_history = [
+                t for t in self.short_query_history if current_time - t <= 5.0
+            ]
+
             # If we've had 3 or more short queries in the last 5 seconds, it's chatter. Block it.
             if len(self.short_query_history) >= 3:
                 print(f"[WebPipeline] Noise filter blocked text: '{text}'")
@@ -471,10 +483,10 @@ class WebVoicePipeline:
         chunker = SentenceChunker()
         ai_full_text = ""
         trace.response_started_at = time.perf_counter()
-        
+
         # Queue to decouple LLM generation from TTS generation
         tts_queue: asyncio.Queue[tuple[str, str] | None] = asyncio.Queue(maxsize=4)
-        
+
         async def tts_worker() -> None:
             """Background worker that streams TTS sub-chunks to the browser as they're generated."""
             while True:
@@ -494,27 +506,29 @@ class WebVoicePipeline:
                 )
 
                 tts_start = time.time()
-                
+
                 # Use streaming TTS when available for lower time-to-first-audio
-                if hasattr(tts, 'synthesize_streaming'):
+                if hasattr(tts, "synthesize_streaming"):
                     loop = asyncio.get_event_loop()
                     chunks = await loop.run_in_executor(
                         None, lambda: list(tts.synthesize_streaming(sentence))
                     )
                     tts_latency = time.time() - tts_start
                     print(f"  [TTS] '{sentence[:40]}...'")
-                    
+
                     for audio_data, fs in chunks:
                         if self._cancel_response or len(audio_data) == 0:
                             break
                         if trace.first_audio_sent_at is None:
                             trace.first_audio_sent_at = time.perf_counter()
                         pcm_data = (audio_data * 32767).astype(np.int16).tobytes()
-                        await send_callback({
-                            "type": "audio",
-                            "data": pcm_data,
-                            "sample_rate": fs,
-                        })
+                        await send_callback(
+                            {
+                                "type": "audio",
+                                "data": pcm_data,
+                                "sample_rate": fs,
+                            }
+                        )
                 else:
                     # Fallback for TTS models without streaming
                     audio_data, fs = await asyncio.get_event_loop().run_in_executor(
@@ -527,12 +541,14 @@ class WebVoicePipeline:
                         if trace.first_audio_sent_at is None:
                             trace.first_audio_sent_at = time.perf_counter()
                         pcm_data = (audio_data * 32767).astype(np.int16).tobytes()
-                        await send_callback({
-                            "type": "audio",
-                            "data": pcm_data,
-                            "sample_rate": fs,
-                        })
-                
+                        await send_callback(
+                            {
+                                "type": "audio",
+                                "data": pcm_data,
+                                "sample_rate": fs,
+                            }
+                        )
+
                 tts_queue.task_done()
 
         # Start the background TTS worker
@@ -551,17 +567,19 @@ class WebVoicePipeline:
                 # Instantly send the partial text token to the frontend
                 ai_full_text += token
                 active_agent = session.active_agent_name
-                
+
                 await send_callback({"type": "agent", "name": active_agent})
-                
-                await send_callback({
-                    "type": "transcript",
-                    "role": "ai",
-                    "text": token, # Send raw token immediately
-                    "agent": active_agent,
-                    "partial": True,
-                })
-                
+
+                await send_callback(
+                    {
+                        "type": "transcript",
+                        "role": "ai",
+                        "text": token,  # Send raw token immediately
+                        "agent": active_agent,
+                        "partial": True,
+                    }
+                )
+
                 # Process the token through the chunker to get words/sentences for TTS
                 for sentence in chunker.process_token(token):
                     if trace.first_tts_chunk_at is None:
@@ -591,13 +609,15 @@ class WebVoicePipeline:
                 return
 
             # Final complete transcript
-            await send_callback({
-                "type": "transcript",
-                "role": "ai",
-                "text": ai_full_text.strip(),
-                "agent": session.active_agent_name,
-                "partial": False,
-            })
+            await send_callback(
+                {
+                    "type": "transcript",
+                    "role": "ai",
+                    "text": ai_full_text.strip(),
+                    "agent": session.active_agent_name,
+                    "partial": False,
+                }
+            )
             await send_callback({"type": "status", "value": "idle"})
             trace.response_finished_at = time.perf_counter()
             self._log_turn_trace(trace, "completed")

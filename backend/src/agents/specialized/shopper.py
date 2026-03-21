@@ -1,3 +1,4 @@
+import os
 from langchain_core.messages import SystemMessage
 from langchain.chat_models import init_chat_model
 from langchain_core.tools import tool
@@ -8,6 +9,10 @@ from typing import Annotated
 from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv())
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+if GROQ_API_KEY:
+    os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 
 SHOPPER_PROMPT = """You are Gamma, a Personal Shopper Voice Agent for an e-commerce platform.
 You will only be referred by the name Gamma, and you also need to introduce as like that.
@@ -42,24 +47,34 @@ When you receive a user from another agent:
 - If they wanted to shop or buy something, start helping them shop immediately.
 """
 
+
 @tool
 def search_catalog(query: str) -> str:
     """Search the product catalog for items matching the query."""
     return f"I found 3 items matching '{query}': A red shirt for $20, blue jeans for $40, and black shoes for $60."
 
+
 @tool
-def transfer_to_customer_care(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
+def transfer_to_customer_care(
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
     """Transfer the user to the Customer Care agent. Use this when the user asks about returns, refunds, or general policies."""
     return Command(
         goto="CustomerCare",
         update={
             "active_agent": "CustomerCare",
             "messages": [
-                ToolMessage(content="Successfully transferred to Customer Care.", tool_call_id=tool_call_id),
-                SystemMessage(content="[SYSTEM]: You just received a handoff from another agent. The user is now talking to YOU, the Customer Care agent. Do NOT say 'I can't help with that' or acknowledge the transfer. Look at their return/complaint/policy request and start helping them immediately.")
-            ]
-        }
+                ToolMessage(
+                    content="Successfully transferred to Customer Care.",
+                    tool_call_id=tool_call_id,
+                ),
+                SystemMessage(
+                    content="[SYSTEM]: You just received a handoff from another agent. The user is now talking to YOU, the Customer Care agent. Do NOT say 'I can't help with that' or acknowledge the transfer. Look at their return/complaint/policy request and start helping them immediately."
+                ),
+            ],
+        },
     )
+
 
 @tool
 def transfer_to_order_ops(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
@@ -69,21 +84,29 @@ def transfer_to_order_ops(tool_call_id: Annotated[str, InjectedToolCallId]) -> C
         update={
             "active_agent": "OrderOps",
             "messages": [
-                ToolMessage(content="Successfully transferred to Order Operations.", tool_call_id=tool_call_id),
-                SystemMessage(content="[SYSTEM]: You just received a handoff from another agent. The user is now talking to YOU, the Order Operations agent. Do NOT say 'I can't help with that' or acknowledge the transfer. Look at their order tracking request and start helping them immediately.")
-            ]
-        }
+                ToolMessage(
+                    content="Successfully transferred to Order Operations.",
+                    tool_call_id=tool_call_id,
+                ),
+                SystemMessage(
+                    content="[SYSTEM]: You just received a handoff from another agent. The user is now talking to YOU, the Order Operations agent. Do NOT say 'I can't help with that' or acknowledge the transfer. Look at their order tracking request and start helping them immediately."
+                ),
+            ],
+        },
     )
 
-def get_shopper_agent(model_name="gpt-4o-mini", model_provider="openai"):
-    llm = init_chat_model(model=model_name, model_provider=model_provider, temperature=0.3)
-    
+
+def get_shopper_agent(model_name=None, model_provider=None):
+    llm = init_chat_model(
+        model="gpt-4o-mini", model_provider="openai", temperature=0.3
+    )
+
     tools = [search_catalog, transfer_to_customer_care, transfer_to_order_ops]
     llm_with_tools = llm.bind_tools(tools)
-    
+
     def call_model(state):
         messages = [SystemMessage(content=SHOPPER_PROMPT)] + state["messages"]
         response = llm_with_tools.invoke(messages)
         return {"messages": [response]}
-        
+
     return call_model
