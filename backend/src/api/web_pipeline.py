@@ -510,17 +510,35 @@ class WebVoicePipeline:
                 # Use streaming TTS when available for lower time-to-first-audio
                 if hasattr(tts, "synthesize_streaming"):
                     loop = asyncio.get_event_loop()
-                    chunks = await loop.run_in_executor(
-                        None, lambda: list(tts.synthesize_streaming(sentence))
-                    )
-                    tts_latency = time.time() - tts_start
-                    print(f"  [TTS] '{sentence[:40]}...'")
+                    audio_queue = asyncio.Queue()
 
-                    for audio_data, fs in chunks:
-                        if self._cancel_response or len(audio_data) == 0:
+                    def run_synthesis():
+                        try:
+                            for chunk in tts.synthesize_streaming(sentence):
+                                if self._cancel_response:
+                                    break
+                                loop.call_soon_threadsafe(audio_queue.put_nowait, chunk)
+                        except Exception as e:
+                            print(f"[WebPipeline] TTS Synthesis error: {e}")
+                        finally:
+                            loop.call_soon_threadsafe(audio_queue.put_nowait, None)
+
+                    loop.run_in_executor(None, run_synthesis)
+
+                    while True:
+                        chunk = await audio_queue.get()
+                        if chunk is None:
                             break
+
+                        audio_data, fs = chunk
+                        if self._cancel_response or len(audio_data) == 0:
+                            continue
+
                         if trace.first_audio_sent_at is None:
                             trace.first_audio_sent_at = time.perf_counter()
+                            # Log TTFA for the first chunk of the first sentence
+                            print(f"  [TTS] First audio chunk sent after {time.time() - tts_start:.3f}s")
+
                         pcm_data = (audio_data * 32767).astype(np.int16).tobytes()
                         await send_callback(
                             {
